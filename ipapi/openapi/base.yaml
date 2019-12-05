@@ -1,0 +1,543 @@
+#id: http://10.0.0.105:5000/openapi.json
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: ipapi
+  description: API definitions for base and extended document schemas mapping GET/POST/PUT/DELETE requests
+  license:
+    name: MIT
+servers:
+- url: http://ip-dev:5000/
+  description: Production server
+- url: http://ip-dev:5001/
+  description: Testing server
+paths:
+  /ipv4:
+    get:
+      summary: List all documents
+      tags:
+      - ipv4
+      parameters:
+      - name: limit
+        in: query
+        description: How many items return
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Array of documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4s"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+    post:
+      summary: Create document
+      tags:
+      - ipv4
+      requestBody:
+        description: Create document
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ipv4"
+      responses:
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/ipv4"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+  /ipv4/{_id}:
+    get:
+      summary: Document details
+      tags:
+      - ipv4
+      parameters:
+      - name: _id
+        in: path
+        description: The _id of document
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+    delete:
+      summary: Document delete
+      tags:
+      - ipv4
+      parameters:
+      - name: _id
+        in: path
+        description: The _id of document
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Document deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+  /router:
+    get:
+      summary: List all Routers
+      tags:
+      - router
+      parameters:
+      - name: limit
+        in: query
+        description: How many items return
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Array of Routers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Routers"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create Router
+      tags:
+      - router
+      requestBody:
+        description: Router to add
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Router"
+      responses:
+        '201':
+          description: Router created
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/Router"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    
+    Error:
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+    
+    UUIDs:
+      description: Array of UUIDs
+      type: array
+      items:
+        type: string
+        format: uuid
+    
+    ArrayOfTime:
+      description: Array of time items
+      type: array
+      items:
+        type: string
+        format: time
+    
+    base:
+      description: base class for extended schemas
+      required:
+      - name
+      - _user_name
+      - _user_ip
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Set to ID of the document, e.g. 192.168.192.1
+        active:
+          type: boolean
+          description: Set true for active document, false for deleted
+          default: true
+        description:
+          type: string
+          description: Description of the document
+        labels:
+          type: array
+          description: Array of labels. Some documents use labels to mark and define behavior, carefully check the impact before manipulating with labels.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        _user_name:
+          type: string
+          description: User name must be set to actual user
+          minLength: 1
+          maxLength: 256
+        _user_ip:
+          oneOf:
+          - type: string
+            format: ipv4
+          - type: string
+            format: ipv6
+          description: User ip must be set to ipv4 or IPv6 address of actual user
+          example: 192.168.192.1
+        _id:
+          type: string
+          format: uuid
+          description: UUID remains unchanged after document update and is used in access, parents and _meta. The property is placed here because of the mongodb 
+          readOnly: true
+        _meta:
+          type: object
+          description: Valid document has _valid set to true. This is safe for crash, as the old document is saved first and becomes stub with _valid set to false. The old version would have contain the same highest _version and _valid_from
+          readOnly: true
+          properties:
+            _class:
+              type: string
+              minLength: 1
+              maxLength: 256
+              description: Type of the document corrensponds to class, uniqueness of the document should be defined within the class
+              readOnly: true
+            _valid:
+              type: boolean
+              description: Set true for the last version of document, false for old
+              default: true
+              readOnly: true
+            _valid_from:
+              type: string
+              format: time
+              description: Date of the document modification
+              readOnly: true
+            _valid_to:
+              type: string
+              format: time
+              description: Date of the document modification
+              readOnly: true
+            _number:
+              type: integer
+              description: Number of the document version is increased by one after each update, one for first document
+              readOnly: true
+            _uuid_valid:
+              type: string
+              format: uuid
+              description: UUID of the valid document, same as _id for first document. This requires one additional update for first document, which is outweighted by search efficiency
+              readOnly: true
+            _uuid_previous:
+              type: string
+              format: uuid
+              description: UUID of the previous valid document, same as _id for first document. This value we get free from mongodb when saving old document and can be used for cheap restrospective walk
+              readOnly: true
+            _provider_name:
+              type: string
+              description: Identity provider name
+              minLength: 1
+              maxLength: 256
+              readOnly: true
+            _provider_ip:
+              type: string
+              description: Identity provider ipv4 or IPv6 address
+              minLength: 1
+              maxLength: 256
+              readOnly: true
+        parents:
+          type: object
+          description: Parent objects defining full mesh hierarchy. Each property is type of document containing Array of parent UUIDs. On creation all undefined properties from parent objects of the same type should be inherited by default
+          properties:
+            ipv4:
+              $ref: "#/components/schemas/UUIDs"
+          additionalProperties: false
+        access:
+          type: object
+          description: Object containing get/post/put/delete/patch access definitions. The get/post/put/delete contains array of allowed Role UUIDs. PATCH is object additionally containig allowed properties using regular expression, each containing array of Role UUIDs
+          properties:
+            get:
+              $ref: "#/components/schemas/UUIDs"
+            post:
+              $ref: "#/components/schemas/UUIDs"
+            put:
+              $ref: "#/components/schemas/UUIDs"
+            delete:
+              $ref: "#/components/schemas/UUIDs"
+            patch:
+              type: object
+              description: Regular expression defining allowed property #TODO
+              additionalProperties:
+                $ref: "#/components/schemas/UUIDs"
+          additionalProperties: false
+    
+    ipv4:
+      description: ipv4 address. Uniqueness is composed from name, prefix and scope. Automatically is set parents.ipv4 to single parent ipv4 network within the same scope. To add new our network set temporarily readOnly to false, this property can not be changed and has to be inherited because is used in process of firewall rule creation.
+      allOf:
+      - $ref: '#/components/schemas/base'
+      - type: object
+        required:
+        - prefix
+        - scope
+        properties:
+          name:
+            format: ipv4
+            description: ipv4 address (192.168.192.1) or network address (192.168.192.0/24)
+            example: 192.168.192.1
+          prefix:
+            type: integer
+            description: ipv4 network mask in CIDR notation, defaults to 32 for ipv4 address
+            minimum: 0
+            maximum: 32
+            example: 32
+            default: 32
+          scope:
+            type: string
+            description: Scope of the ipv4, inherited from parent network
+            default: global
+          our:
+            type: boolean
+            description: Set to true for our ipv4, inherited from parent network
+            default: false
+            readOnly: true
+          whitelisted:
+            type: boolean
+            description: Set to true to whitelist ipv4, inherited from parent network
+            default: false
+          reverse:
+            type: string
+            description: Reverse DNS
+            minLength: 1
+            maxLength: 255
+          firewall:
+            $ref: "#/components/schemas/ipv4Rule"
+          auto_activate:
+            $ref: "#/components/schemas/ArrayOfTime"
+          auto_deactivate:
+            $ref: "#/components/schemas/ArrayOfTime"
+    
+    ipv4s:
+      type: array
+      items:
+        $ref: "#/components/schemas/ipv4"
+    
+    Router:
+      description: Router
+      allOf:
+      - $ref: '#/components/schemas/base'
+      - type: object
+        properties:
+          acl:
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Access list
+                  minLength: 1
+                  maxLength: 255
+                version:
+                  type: string
+                  enum:
+                  - ipv4
+                  - ipv6
+                  default: ipv4
+                direction:
+                  type: string
+                  description: Direction of acl
+                  enum:
+                  - in
+                  - out
+                interface:
+                  type: string
+                  description: Direction of interface
+                  enum:
+                  - in
+                  - out
+                count-max:
+                  type: integer
+                  description: Number of allowed entries
+                sequence-min:
+                  type: integer
+                  description: Min entry number
+                sequence-max:
+                  type: integer
+                  description: Max entry number
+          blackhole:
+            type: array
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Blackhole
+                  minLength: 1
+                  maxLength: 255
+    
+    Routers:
+      type: array
+      items:
+        $ref: "#/components/schemas/Router"
+    
+    ipv4Rule:
+      type: object
+      description: ipv4 firewall rule definition must comply with correspoding Router
+      required:
+      - router
+      - acl
+      - sequence
+      - source-address
+      - destination-address
+      properties:
+        router:
+          type: string
+          description: Existing router
+        acl:
+          type: string
+          description: Existing acl
+        sequence:
+          type: integer
+          description: Rule sequence
+        action:
+          type: string
+          description: Rule action
+          enum:
+          - permit
+          - deny
+          default: deny
+        protocol:
+          type: string
+          description: Protocol
+          enum:
+          - ip
+          - tcp
+          - udp
+          - icmp
+          - gre
+          - ah
+          - esp
+          default: ip
+        source-address:
+          type: string
+          description: Source ipv4 address
+          format: ipv4
+        source-prefix:
+          type: integer
+          description: ipv4 network mask in CIDR notation, defaults to 32 for ipv4 address
+          minimum: 0
+          maximum: 32
+          example: 32
+          default: 32
+        source-port:
+          oneOf:
+          - $ref: "#/components/schemas/PortAny"
+          - $ref: "#/components/schemas/PortEq"
+          - $ref: "#/components/schemas/PortRange"
+        destination-address:
+          type: string
+          description: Destination ipv4 address
+        destination-prefix:
+          type: integer
+          description: ipv4 network mask in CIDR notation, defaults to 32 for ipv4 address
+          minimum: 0
+          maximum: 32
+          example: 32
+          default: 32
+    
+    PortAny:
+        type: string
+        enum:
+        - any
+    
+    PortEq:
+        type: integer
+        minimum: 0
+        maximum: 65535
+    
+    PortRange:
+        type: object
+        properties:
+          min:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          max:
+            type: integer
+            minimum: 0
+            maximum: 65535
+    
+    ipv4Blackhole:
+      type: object
+      description: ipv4 blackhole definition must comply with correspoding Router
+      required:
+      - router
+      - destination-address
+      properties:
+        router:
+          type: string
+          description: Existing router
+        destination-address:
+          type: string
+          description: Destination ipv4 address
+        destination-prefix:
+          type: integer
+          description: ipv4 network mask in CIDR notation, defaults to 32 for ipv4 address
+          minimum: 0
+          maximum: 32
+          example: 32
+          default: 32
+  
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: X-Auth
+      in: header
+      x-apikeyInfoFunc: ipapi.apikey_auth
+
