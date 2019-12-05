@@ -66,7 +66,11 @@ class base:
     '''
     puts data to self.data and sets object properties
     
-    data_source can be request or database
+    data_source can be request or db
+    
+    data_source request accepts dict as data
+    
+    data_source db accepst _id as data
     '''
     self.data = data
     self.data_source = data_source
@@ -78,24 +82,21 @@ class base:
       self._class = self.__class__.__name__
       #data
       self.data['_id'] = uuid4()
-      self.data['_meta'] = {}
-      self.data['_meta']['_provider_name'] = self._provider_name
-      self.data['_meta']['_provider_ip'] = self._provider_ip
-      self.data['_meta']['_class'] = self._class
-      self.data['_meta']['_valid'] = True
-      self.data['_meta']['_valid_from'] = datetime.now()
-      self.data['_meta']['_valid_to'] = datetime.max
-    elif self.data_source == 'database':
+      #meta
+      self._set_meta()
+    elif self.data_source == 'db':
       self._provider_name = self.data['_meta']['_provider_name']
       self._provider_ip = self.data['_meta']['_provider_name']
       self._class = self.__class__.__name__
       assert self._class == self.data['_meta']['_class']
+      #data
+      self.data = self._find_one({'_id': UUID(data)})
     elif self.data_source == 'database_initialization':
       self._provider_name = 'root'
       self._provider_ip = '127.0.0.1'
       self._class = self.__class__.__name__
       #data
-      self.data['_id'] = uuid1()
+      self.data['_id'] = uuid4()
       self.data['_meta'] = {}
       self.data['_meta']['_provider_name'] = self._provider_name
       self.data['_meta']['_provider_ip'] = self._provider_ip
@@ -107,6 +108,18 @@ class base:
       raise AttributeError('Unknown data_source')
     log.d(self.data)
   
+  def _set_meta():
+    '''
+    set meta after request or before _save
+    '''
+    self.data['_meta'] = {}
+    self.data['_meta']['_provider_name'] = self._provider_name
+    self.data['_meta']['_provider_ip'] = self._provider_ip
+    self.data['_meta']['_class'] = self._class
+    self.data['_meta']['_valid'] = True
+    self.data['_meta']['_valid_from'] = datetime.now()
+    self.data['_meta']['_valid_to'] = datetime.max
+    
   def connect_db(f):
     '''
     connect database to g.ipapi and
@@ -207,8 +220,13 @@ class base:
   
   def _save(self):
     '''
-    saves document,
-    method must be defined by child class
+    saves document
+    '''
+    raise NotImplementedError()
+  
+  def _find_one(self, data):
+    '''
+    find one document
     '''
     raise NotImplementedError()
   
@@ -264,6 +282,7 @@ class base:
     print(i)
     a = self.__init__(data)
     col.insert_one(a.data)
+    log.i(a.data)
     return a.data, 201
     # load parents
     
@@ -289,5 +308,20 @@ class base:
       return NoContent, 404
     else:
       return base.json_multi(col.find()), 200
+  
+  @connect_db
+  @validate_provider_ip
+  @validate_user_ip
+  @validate_provider_access_get
+  @validate_user_access_get
+  def delete():
+    if self.data and self.data['active']:
+      self.data['active'] = False
+      self._set_meta()
+      self._save()
+      log.i(self.data)
+      return NoContent, 204
+    return NoContent, 404
+
 
 

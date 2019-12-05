@@ -9,10 +9,7 @@ LOGLEVEL = 'DEBUG'
 
 import connexion
 from connexion.resolver import MethodViewResolver
-app = connexion.FlaskApp(__name__,
-                         specification_dir='openapi/',
-                         debug=True)
-
+from flask import g
 
 from .apikey import apikey_auth
 from .base import base, log
@@ -21,15 +18,24 @@ from .router import RouterView
 
 
 
-# load api
-app.add_api('base.yaml',
-            options={"swagger_ui": True},
-            arguments={'title': 'MethodViewResolver ipapi'},
-            resolver=MethodViewResolver('ipapi'), strict_validation=True, validate_responses=False)
-
-app.app.logger.setLevel(LOGLEVEL)
-app.app.logger.warning(f'Logging configured at level {LOGLEVEL}')
-
-
-
-application = app.app
+def create_app():
+  '''
+  application factory
+  '''
+  app = connexion.FlaskApp(__name__,
+                          specification_dir='openapi/',
+                          debug=True)
+  # load api
+  app.add_api('base.yaml',
+              options={"swagger_ui": True},
+              arguments={'title': 'MethodViewResolver ipapi'},
+              resolver=MethodViewResolver('ipapi'),
+              strict_validation=True,
+              validate_responses=False)
+  
+  # set logging
+  app.app.logger.setLevel(LOGLEVEL)
+  with app.app.app_context():
+    log.i(f'Logging configured at level {LOGLEVEL}')
+  
+  return app

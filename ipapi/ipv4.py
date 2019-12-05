@@ -27,7 +27,13 @@ class ipv4(base):
     saves document
     '''
     g.ipv4.insert_one(self.data)
-    log.i(self.data)
+  
+  def _find_one(self, data):
+    '''
+    find one document
+    '''
+    return g.ipv4.find_one(data)
+
 
 
 class Ipv4View(MethodView):
@@ -58,12 +64,8 @@ class Ipv4View(MethodView):
     aaa['time']  = datetime.now()
     return aaa, 201
   
-  def delete(self, id):
-    id = int(id)
-    if id not in self.aaas:
-      return NoContent, 404
-    self.aaas.pop(id)
-    return NoContent, 204
+  def delete(self, _id):
+    return ipv4(_id, 'db').delete()
   
   def search(self, limit=100):
     return ipv4.get()
