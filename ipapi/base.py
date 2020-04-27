@@ -219,14 +219,6 @@ class base:
       return f(*args, **kwargs)
     return wrapper
   
-  def validate_provider_access_get(f):
-    '''
-    TODO
-    '''
-    def wrapper(*args, **kwargs):
-      return f(*args, **kwargs)
-    return wrapper
-  
   def validate_user_access_get(f):
     '''
     TODO
@@ -330,7 +322,6 @@ class base:
   @connect_db
   @validate_provider_ip
   @validate_user_ip
-  @validate_provider_access_get
   @validate_user_access_get
   def post(self):
     '''
@@ -352,7 +343,6 @@ class base:
   @connect_db
   @validate_provider_ip
   @validate_user_ip
-  @validate_provider_access_get
   @validate_user_access_get
   def get(cls, _id = None, find = None, projection = None, sort = None, skip = 0, limit = 0, **kwargs):
     '''
@@ -407,7 +397,6 @@ class base:
   @connect_db
   @validate_provider_ip
   @validate_user_ip
-  @validate_provider_access_get
   @validate_user_access_get
   def delete(cls, _id, data):
     '''
