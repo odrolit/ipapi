@@ -18,6 +18,30 @@ paths:
       tags:
       - ipv4
       parameters:
+      - name: find
+        in: query
+        description: 'Query example {"name": "1.1.1.1"} https://docs.mongodb.com/manual/reference/operator/query/'
+        required: false
+        schema:
+          type: string
+      - name: projection
+        in: query
+        description: 'Projection example {"name": 1, "labels": 1, "_id": 0} https://docs.mongodb.com/manual/reference/operator/query/'
+        required: false
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: 'Sort example {"labels": 1, "name": -1} ASCENDING = 1, DESCENDING = -1'
+        required: false
+        schema:
+          type: string
+      - name: skip
+        in: query
+        description: How many items skip
+        required: false
+        schema:
+          type: integer
       - name: limit
         in: query
         description: How many items return
@@ -77,6 +101,12 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: projection
+        in: query
+        description: 'Projection example {"name": 1, "labels": 1, "_id": 0} https://docs.mongodb.com/manual/reference/operator/query/'
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Document details
@@ -104,9 +134,42 @@ paths:
         schema:
           type: string
           format: uuid
+      requestBody:
+        description: User details
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/baseGetDelete"
       responses:
         '204':
           description: Document deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+    put:
+      summary: Document update
+      tags:
+      - ipv4
+      parameters:
+      - name: _id
+        in: path
+        description: The _id of document
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '201':
+          description: Document updated
           content:
             application/json:
               schema:
@@ -173,12 +236,15 @@ components:
     
     Error:
       required:
-      - code
-      - message
+      - detail
+      - status
+      - title
       properties:
-        code:
+        detail:
+          type: string
+        status:
           type: integer
-        message:
+        title:
           type: string
     
     UUIDs:
@@ -195,6 +261,26 @@ components:
         type: string
         format: time
     
+    baseGetDelete:
+      description: base schema for GET and DELETE
+      required:
+      - _user_name
+      - _user_ip
+      properties:
+        _user_name:
+          type: string
+          description: User name must be set to actual user
+          minLength: 1
+          maxLength: 256
+        _user_ip:
+          oneOf:
+          - type: string
+            format: ipv4
+          - type: string
+            format: ipv6
+          description: User ip must be set to ipv4 or IPv6 address of actual user
+          example: 1.1.1.1
+    
     base:
       description: base class for extended schemas
       required:
@@ -206,7 +292,7 @@ components:
           type: string
           minLength: 1
           maxLength: 256
-          description: Set to ID of the document, e.g. 192.168.192.1
+          description: Set to ID of the document, e.g. 1.1.1.1
         active:
           type: boolean
           description: Set true for active document, false for deleted
@@ -233,7 +319,7 @@ components:
           - type: string
             format: ipv6
           description: User ip must be set to ipv4 or IPv6 address of actual user
-          example: 192.168.192.1
+          example: 1.1.1.1
         _id:
           type: string
           format: uuid
@@ -328,8 +414,8 @@ components:
         properties:
           name:
             format: ipv4
-            description: ipv4 address (192.168.192.1) or network address (192.168.192.0/24)
-            example: 192.168.192.1
+            description: ipv4 address (1.1.1.1) or network address (1.1.1.0/24)
+            example: 1.1.1.1
           prefix:
             type: integer
             description: ipv4 network mask in CIDR notation, defaults to 32 for ipv4 address
@@ -340,6 +426,7 @@ components:
           scope:
             type: string
             description: Scope of the ipv4, inherited from parent network
+            example: global
             default: global
           our:
             type: boolean

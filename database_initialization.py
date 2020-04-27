@@ -37,6 +37,7 @@ args = parser.parse_args()
 
 
 with app.app.app_context():
+  ipapi.log.w('please check if LOGLEVEL is DEBUG')
   #create text indexes for all collections
   for i in ipapi.base.collections():
     if args.force_delete_all_data:
@@ -53,7 +54,12 @@ with app.app.app_context():
       data['_user_name'] = 'root'
       data['_user_ip'] = '127.0.0.1'
       if i == 'ipv4':
-        data['name'] = '0.0.0.0/0'
+        db[i].create_index([('scope', 1), 
+                            ('_meta._first', 1), 
+                            ('_meta._last', 1)])
+        data['name'] = '0.0.0.0'
+        data['prefix'] = 0
+        data['scope'] = 'global'
         ii = ipapi.ipv4(data, 'database_initialization')
         #_set_parents loop hook
         ii.data['parents'] = {}

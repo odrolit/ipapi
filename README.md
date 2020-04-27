@@ -19,9 +19,15 @@ systemctl start mongod
 ### install epel-release, python36 and pip; upgrade pip3.6
 ```
 yum install epel-release
-yum install python36
-yum install python36-pip
+yum install python36 #python3
+yum install python36-pip #python3-pip
 pip install --upgrade pip
+```
+
+### install gcc and python36-devel for uwsgi
+```
+yum install gcc
+yum install python36-devel #python3-devel
 ```
 
 ### git clone ipapi; cd ipapi

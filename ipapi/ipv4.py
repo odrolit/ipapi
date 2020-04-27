@@ -7,6 +7,8 @@ class ipv4(base):
   ipv4 class
   """
   
+  IMPLICIT_PARENTS = True
+  
   def __init__(self, data, data_source = 'request'):
     '''
     puts data to self.data and sets object properties
@@ -14,25 +16,43 @@ class ipv4(base):
     data_source can be request or database
     '''
     super().__init__(data, data_source)
-  
+    
+    n = IPv4Network(f'{self.data["name"]}/{self.data["prefix"]}')
+    #check request
+    if self.data_source == 'request':
+      if self.data['scope'] == 'global' and not n.is_global:
+        raise AttributeError('Not global address')
+    #do not check db
+    if self.data_source != 'db':
+      #bin hook for search efficiency
+      self.data['_bin'] = {}
+      self.data['_bin']['_first'] = n.network_address.packed
+      self.data['_bin']['_last'] = n.broadcast_address.packed
+
   def _get_parents(self):
     '''
     returns list containing direct parents or root document
     TODO
     '''
-    return [g.ipv4.find_one({'_meta._valid': True, 'name': '0.0.0.0/0'})]
+    return g.ipv4.find({'_meta._valid': True,
+                     'scope': self.data['scope'],
+                     '_bin._first': {'$lte': self.data['_bin']['_first']},
+                     '_bin._last': {'$gte': self.data['_bin']['_last']}}, {'name': 1, })
   
   def _save(self):
     '''
-    saves document
+    saves document and returns _id
     '''
-    g.ipv4.insert_one(self.data)
+    return g.ipv4.insert_one(self.data).inserted_id
   
-  def _find_one(self, data):
+  def _already_exists(self):
     '''
-    find one document
+    returns True if already exists
     '''
-    return g.ipv4.find_one(data)
+    if self._find_one({'name': self.data['name'],
+                       'prefix': self.data['prefix'],
+                       'scope': self.data['scope']}):
+      return True
 
 
 
@@ -43,14 +63,14 @@ class Ipv4View(MethodView):
   method_decorators = []
   aaas = {}
   
-  def get(self, _id):
-    return ipv4.get(_id)
+  def get(self, **kwargs):
+    return ipv4.get(**kwargs)
   
   def post(self):
-    return ipv4(request.json).post()
-    return ipv4.post(request.json)
-    a = ipv4(request.json)
-    return a.data, 201
+    try:
+      return ipv4(request.json).post()
+    except Exception as e:
+      return e400(e)
   
   def put(self, id):
     id = int(id)
@@ -65,10 +85,11 @@ class Ipv4View(MethodView):
     return aaa, 201
   
   def delete(self, _id):
+    return ipv4.delete(_id, request.json)
     return ipv4(_id, 'db').delete()
   
-  def search(self, limit=100):
-    return ipv4.get()
+  def search(self, **kwargs):
+    return ipv4.get(**kwargs)
     #NOTE: we need to wrap it with list for Python 3 as dict_values is not JSON serializable
     return list(self.aaas.values())[0:limit]
 
