@@ -50,6 +50,6 @@ class RouterView(MethodView):
     return NoContent, 204
   
   def search(self, limit=100):
-    return ipv4.get()
+    return ipv4().get()
     #NOTE: return list for Python 3 as dict_values is not JSON serializable
     return list(self.routers.values())[0:limit]

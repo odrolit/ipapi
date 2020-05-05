@@ -18,6 +18,20 @@ paths:
       tags:
       - ipv4
       parameters:
+      - name: _user_name
+        in: query
+        description: User name must be set to actual user
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+      - name: _user_ip
+        in: query
+        description: User ip must be set to ipv4 or ipv6 address of actual user
+        required: true
+        schema:
+          $ref: "#/components/schemas/ip"
       - name: find
         in: query
         description: 'Query example {"name": "1.1.1.1"} https://docs.mongodb.com/manual/reference/operator/query/'
@@ -94,6 +108,20 @@ paths:
       tags:
       - ipv4
       parameters:
+      - name: _user_name
+        in: query
+        description: User name must be set to actual user
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+      - name: _user_ip
+        in: query
+        description: User ip must be set to ipv4 or IPv6 address of actual user
+        required: true
+        schema:
+          $ref: "#/components/schemas/ip"
       - name: _id
         in: path
         description: The _id of document
@@ -127,6 +155,20 @@ paths:
       tags:
       - ipv4
       parameters:
+      - name: _user_name
+        in: query
+        description: User name must be set to actual user
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+      - name: _user_ip
+        in: query
+        description: User ip must be set to ipv4 or IPv6 address of actual user
+        required: true
+        schema:
+          $ref: "#/components/schemas/ip"
       - name: _id
         in: path
         description: The _id of document
@@ -134,12 +176,6 @@ paths:
         schema:
           type: string
           format: uuid
-      requestBody:
-        description: User details
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/baseGetDelete"
       responses:
         '204':
           description: Document deleted
@@ -261,25 +297,14 @@ components:
         type: string
         format: time
     
-    baseGetDelete:
-      description: base schema for GET and DELETE
-      required:
-      - _user_name
-      - _user_ip
-      properties:
-        _user_name:
-          type: string
-          description: User name must be set to actual user
-          minLength: 1
-          maxLength: 256
-        _user_ip:
-          oneOf:
-          - type: string
-            format: ipv4
-          - type: string
-            format: ipv6
-          description: User ip must be set to ipv4 or IPv6 address of actual user
-          example: 1.1.1.1
+    ip:
+      description: Plain ipv4 or ipv6 address
+      type: string
+      oneOf:
+      - type: string
+        format: ipv4
+      - type: string
+        format: ipv6
     
     base:
       description: base class for extended schemas
@@ -351,9 +376,9 @@ components:
               format: time
               description: Date of the document modification
               readOnly: true
-            _number:
+            _version:
               type: integer
-              description: Number of the document version is increased by one after each update, one for first document
+              description: Document version is increased by one after each update, one for first document
               readOnly: true
             _uuid_valid:
               type: string

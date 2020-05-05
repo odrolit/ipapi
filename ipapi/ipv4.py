@@ -39,12 +39,6 @@ class ipv4(base):
                      '_bin._first': {'$lte': self.data['_bin']['_first']},
                      '_bin._last': {'$gte': self.data['_bin']['_last']}}, {'name': 1, })
   
-  def _save(self):
-    '''
-    saves document and returns _id
-    '''
-    return g.ipv4.insert_one(self.data).inserted_id
-  
   def _already_exists(self):
     '''
     returns True if already exists
@@ -64,13 +58,14 @@ class Ipv4View(MethodView):
   aaas = {}
   
   def get(self, **kwargs):
-    return ipv4.get(**kwargs)
-  
-  def post(self):
     try:
-      return ipv4(request.json).post()
+      return ipv4.get(**kwargs)
     except Exception as e:
       return e400(e)
+  
+  def post(self):
+    return ipv4.post(request.json)
+
   
   def put(self, id):
     id = int(id)
@@ -86,7 +81,7 @@ class Ipv4View(MethodView):
   
   def delete(self, _id):
     return ipv4.delete(_id, request.json)
-    return ipv4(_id, 'db').delete()
+
   
   def search(self, **kwargs):
     return ipv4.get(**kwargs)

@@ -64,8 +64,22 @@ def e400(detail):
   e = {
     "detail": str(detail),
     "status": 400,
-    "title": "Bad request"
+    "title": "Bad request",
+    "type": "about:blank"
     }, 400
+  log.e(e)
+  return e
+
+def e401(detail):
+  '''
+  logs error and returns data in json
+  '''
+  e = {
+    "detail": str(detail),
+    "status": 401,
+    "title": "Unauthorized",
+    "type": "about:blank"
+    }, 401
   log.e(e)
   return e
 
@@ -76,7 +90,8 @@ def e404(detail):
   e = {
     "detail": str(detail),
     "status": 404,
-    "title": "Not found"
+    "title": "Not found",
+    "type": "about:blank"
     }, 404
   log.e(e)
   return e
@@ -88,7 +103,8 @@ def e409(detail):
   e = {
     "detail": str(detail),
     "status": 409,
-    "title": "Conflict"
+    "title": "Conflict",
+    "type": "about:blank"
     }, 409
   log.e(e)
   return e
@@ -118,54 +134,48 @@ class base:
     
     data_source db accepst _id as data
     '''
-    self.data = data
+    self.data = None
     self.data_source = data_source
-    self._user_name = data['_user_name']
-    self._user_ip = data['_user_ip']
+    self._class = self.__class__.__name__
     if self.data_source == 'request':
-      self._provider_name = context['user']
-      self._provider_ip = request.remote_addr
-      self._class = self.__class__.__name__
-      #data
-      self.data['_id'] = uuid4()
-      #meta
+      self.data = data
       self._set_meta()
     elif self.data_source == 'db':
-      self._provider_name = self.data['_meta']['_provider_name']
-      self._provider_ip = self.data['_meta']['_provider_name']
-      self._class = self.__class__.__name__
-      assert self._class == self.data['_meta']['_class']
-      #data
       self.data = self._find_one({'_id': UUID(data)})
+      if not self.data:
+        raise AttributeError('Not found')
     elif self.data_source == 'database_initialization':
-      self._provider_name = 'root'
-      self._provider_ip = '127.0.0.1'
-      self._class = self.__class__.__name__
-      #data
-      self.data['_id'] = uuid4()
-      self.data['_meta'] = {}
-      self.data['_meta']['_provider_name'] = self._provider_name
-      self.data['_meta']['_provider_ip'] = self._provider_ip
-      self.data['_meta']['_class'] = self._class
-      self.data['_meta']['_valid'] = True
-      self.data['_meta']['_valid_from'] = datetime.now()
-      self.data['_meta']['_valid_to'] = datetime.max
+      g._provider_name = 'root'
+      g._provider_ip = '127.0.0.1'
+      self.data = data
+      self._set_meta()
+      self.data['_meta']['_version'] = 1
+      self.data['_meta']['_uuid_valid'] = self.data['_id']
+    if self.data:
+      log.d(self.data)
     else:
-      log.i('__init__')
+      log.e('__init__')
       raise AttributeError('Unknown data_source')
-    log.d(self.data)
   
   def _set_meta(self):
     '''
-    set meta after request or before _save
+    set meta parameters to current request context
+    
+    used after request or before _insert_one
     '''
+    self.data['_id'] = uuid4()
+    self.data['_user_name'] = g._user_name
+    self.data['_user_ip'] = g._user_ip
     self.data['_meta'] = {}
-    self.data['_meta']['_provider_name'] = self._provider_name
-    self.data['_meta']['_provider_ip'] = self._provider_ip
+    self.data['_meta']['_provider_name'] = g._provider_name
+    self.data['_meta']['_provider_ip'] = g._provider_ip
     self.data['_meta']['_class'] = self._class
     self.data['_meta']['_valid'] = True
     self.data['_meta']['_valid_from'] = datetime.now()
     self.data['_meta']['_valid_to'] = datetime.max
+    #rest must me set individually
+    self.data['_meta']['_version'] = None
+    self.data['_meta']['_uuid_valid'] = None
     
   def connect_db(f):
     '''
@@ -184,16 +194,22 @@ class base:
           # TypeError: '_AppCtxGlobals' object does not support item assignment
           setattr(g, i, g.ipapi[i])
           log.d(f'Connected collection {i} to g.{i}')
+      else:
+        log.w('Database was already connected')
       return f(*args, **kwargs)
     return wrapper
   
-  def validate_provider_ip(f):
+  def validate_provider(f):
     '''
     checks if request.remote_addr is in allowed
     provider_ipv4 or provider_ipv6 network
+    
+    set g._provider_name and g._provider_ip
     '''
     def wrapper(*args, **kwargs):
-      ip = ip_address(request.remote_addr)
+      g._provider_name = context['user']
+      g._provider_ip = request.remote_addr
+      ip = ip_address(g._provider_ip)
       if ip.version == 4:
         for i in context['token_info']['provider_ipv4']:
           if ip in IPv4Network(i):
@@ -205,17 +221,29 @@ class base:
             # ok
             return f(*args, **kwargs)
       # ko
-      log.i('validate_provider_ip')
-      return 'Provider IP not allowed', 401
+      return e401('Provider IP not allowed')
     return wrapper
   
-  def validate_user_ip(f):
+  def validate_user(f):
     '''
+    checks if data['_user_name'] exists
+    and is active
+    
     checks if data['_user_ip'] is in allowed
     user_ipv4 or user_ipv6 network
-    TODO
+    
+    set g._user_name and g._user_ip
     '''
     def wrapper(*args, **kwargs):
+      #TODO
+      if request.method == 'POST':
+        #POST
+        g._user_name = args[1]['_user_name']
+        g._user_ip = args[1]['_user_ip']
+      else:
+        #GET, PUT, DELETE
+        g._user_name = kwargs['_user_name']
+        g._user_ip = kwargs['_user_ip']
       return f(*args, **kwargs)
     return wrapper
   
@@ -258,13 +286,13 @@ class base:
       for i in self._get_parents():
         self.data['parents'][self._class].append(i['_id'])
   
-  def _save(self):
+  def _insert_one(self):
     '''
     method must be defined by child class,
     saves document and returns _id
     '''
-    log.i('_save')
-    raise NotImplementedError()
+    col = getattr(g, self._class)
+    return col.insert_one(self.data).inserted_id
   
   def _already_exists(self, data):
     '''
@@ -319,11 +347,12 @@ class base:
     """
     return (i.__name__ for i in base.__subclasses__())
   
+  @classmethod
   @connect_db
-  @validate_provider_ip
-  @validate_user_ip
+  @validate_provider
+  @validate_user
   @validate_user_access_get
-  def post(self):
+  def post(cls, data):
     '''
     create document
     
@@ -331,18 +360,22 @@ class base:
     
     TODO
     '''
-    if self._already_exists():
-      return e409('Already exists')
-    self._set_parents()
+    a = cls(data)
+    if a._already_exists():
+      return e409('already exists')
+    a._set_parents()
+    a.data['_meta']['_version'] = 1
     #TODO _set_access
     #TODO change parents and childs
-    _id = str(self._save())
-    return self.get(_id), 201
+    _id = str(a._insert_one())
+    a.data['_meta']['_version'] = _id
+    #TODO update_one
+    return cls(_id, 'db'), 201
 
   @classmethod
   @connect_db
-  @validate_provider_ip
-  @validate_user_ip
+  @validate_provider
+  @validate_user
   @validate_user_access_get
   def get(cls, _id = None, find = None, projection = None, sort = None, skip = 0, limit = 0, **kwargs):
     '''
@@ -385,7 +418,7 @@ class base:
           return base.json_one(a)
         #404
         log.e(('get', _id, find, projection, sort, skip, limit, kwargs))
-        return e404(f'get')
+        return e404(f'get {_id}')
       else:
         a = cls._find_multi(find, projection=projection, sort=sort, skip=skip, limit=limit)
         #always return list, not 404
@@ -395,25 +428,32 @@ class base:
   
   @classmethod
   @connect_db
-  @validate_provider_ip
-  @validate_user_ip
+  @validate_provider
+  @validate_user
   @validate_user_access_get
   def delete(cls, _id, data):
     '''
-    delete document by setting active = False
+    delete document identified by _id
+    by setting active = False
     
-    TODO @validate_provider_access_delete
+    data must contain _user_ip and _user_name
     '''
-    print('test')
-    data['_id'] = _id
-    a = cls(data, 'db')
-    print('test')
-    if self.data and self.data['active']:
-      self.data['active'] = False
-      self._set_meta()
-      self._save()
-      log.i(self.data)
-      return NoContent, 204
+    log.d('old')
+    log.d(_id)
+    old = cls._find_one({'_id': UUID(_id)})
+    if not old:
+      return e404(f'delete {_id}')
+    if not old['active']:
+      return e409(f'already deleted {_id}')
+    new = cls(cls._find_one({'_id': UUID(_id)}))
+    pprint(new)
+    log.d('new')
+    log.d(new.data['_id'])
+    new.data['active'] = False
+    new._insert_one()
+    log.i(new.data)
+    return NoContent, 204
+    #except
     log.i('delete')
     return NoContent, 404
 
