@@ -28,18 +28,8 @@ class ipv4(base):
       self.data['_bin'] = {}
       self.data['_bin']['_first'] = n.network_address.packed
       self.data['_bin']['_last'] = n.broadcast_address.packed
-
-  def _get_parents(self):
-    '''
-    returns list containing direct parents or root document
-    TODO
-    '''
-    return g.ipv4.find({'_meta._valid': True,
-                     'scope': self.data['scope'],
-                     '_bin._first': {'$lte': self.data['_bin']['_first']},
-                     '_bin._last': {'$gte': self.data['_bin']['_last']}}, {'name': 1, })
   
-  def _already_exists(self):
+  def _C_C_already_exists(self):
     '''
     returns True if already exists
     '''
@@ -47,6 +37,31 @@ class ipv4(base):
                        'prefix': self.data['prefix'],
                        'scope': self.data['scope']}):
       return True
+
+  def _C_C_get_parents(self):
+    '''
+    returns list containing direct parents or root document
+    '''
+    return g.ipv4.find({'_meta._valid': True,
+                     'scope': self.data['scope'],
+                     '_bin._first': {'$lte': self.data['_bin']['_first']},
+                     '_bin._last': {'$gte': self.data['_bin']['_last']}}, {'name': 1, })
+  
+  def _I_P_is_leaf(self):
+    '''
+    returns True if self is leaf
+    '''
+    if self.data['prefix'] == 32:
+      return True
+  
+  def _I_P_is_parent_of(self, child):
+    '''
+    returns True if self is parent of child
+    '''
+    return self.data['scope'] == child['scope'] and \
+      self.data['prefix'] < child['prefix'] and \
+      self.data['_bin']['_first'] <= child['_bin']['_first'] and \
+      self.data['_bin']['_last'] >= child['_bin']['_last']
 
 
 

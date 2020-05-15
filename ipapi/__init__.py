@@ -15,6 +15,8 @@ from flask import g
 from .apikey import apikey_auth
 from .base import base, log
 from .ipv4 import ipv4, Ipv4View
+from .user import user, UserView
+from .group import group, GroupView
 from .router import RouterView
 
 

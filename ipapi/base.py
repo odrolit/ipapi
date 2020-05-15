@@ -9,6 +9,8 @@ from uuid import uuid4, UUID
 from json import loads
 from bson import json_util
 from copy import deepcopy
+#TODO deepcopy delete ?
+from re import match
 
 from pprint import pprint
 
@@ -121,41 +123,64 @@ class base:
   False means user defined same class parents
   are preserved or added if missing
   
-  True means same class parents are set implicitly
+  True means same class parents are set implicitly,
+  following funcions must be then defined:
+  - _I_P_is_leaf()
+  - _I_P_is_parent_of(parent)
   '''
   
   def __init__(self, data, data_source = 'request'):
     '''
     puts data to self.data and sets object properties
     
-    data_source can be request or db
+    data_source can be:
+    - request (default)
+    - db
+    - copy
+        
+    request (default)
+    - accept dict as data
+    - _set_meta according to request
     
-    data_source request accepts dict as data
+    db
+    - accept _id as data
+    - get data from db, _meta is unchanged
     
-    data_source db accepst _id as data
+    copy
+    - accept _id as data
+    - get data from db, change _meta._valid,
+      _meta._valid_to and _id and saves it
+      as new document
+    - _set_meta according to request,
+      restore original _id, adjust _meta._valid_from,
+      _meta._uuid_previous, _meta._version
+      and return it for other modification
     '''
-    self.data = None
     self.data_source = data_source
     self._class = self.__class__.__name__
-    if self.data_source == 'request':
+    log.d(('__init__', self._class, self.data_source, data))
+    if self.data_source in ['request', 'database_initialization']:
       self.data = data
       self._set_meta()
-    elif self.data_source == 'db':
+    elif self.data_source in ['db', 'copy']:
       self.data = self._find_one({'_id': UUID(data)})
       if not self.data:
-        raise AttributeError('Not found')
-    elif self.data_source == 'database_initialization':
-      g._provider_name = 'root'
-      g._provider_ip = '127.0.0.1'
-      self.data = data
-      self._set_meta()
-      self.data['_meta']['_version'] = 1
-      self.data['_meta']['_uuid_valid'] = self.data['_id']
-    if self.data:
-      log.d(self.data)
+        raise AttributeError(f'Not found {self._class} {data}')
     else:
-      log.e('__init__')
-      raise AttributeError('Unknown data_source')
+      raise AttributeError(f'Unknown data_source {data_source}')
+    if self.data_source == 'copy':
+      #save old copy
+      old_id = self.data['_id'] = uuid4()
+      self.data['_meta']['_valid'] = False
+      old_now = self.data['_meta']['_valid_to'] = datetime.now()
+      self._insert_one()
+      #make new
+      self._set_meta()
+      self.data['_id'] = UUID(data)
+      self.data['_meta']['_valid_from'] = old_now
+      self.data['_meta']['_uuid_previous'] = old_id
+      self.data['_meta']['_version'] += 1
+    log.d(('__init__', self._class, self.data_source, data))
   
   def _set_meta(self):
     '''
@@ -255,13 +280,31 @@ class base:
       return f(*args, **kwargs)
     return wrapper
   
-  def _get_parents(self):
+  def _C_C_get_parents(self):
     '''
     method must be defined by child class,
     returns list containing direct parents or root document
     '''
-    log.i('_get_parents')
+    log.e('_C_C_get_parents')
     raise NotImplementedError()
+  
+  @classmethod
+  def _get_children(cls, _id):
+    '''
+    returns list containing all
+    active and valid children
+    '''
+    log.d(('_get_children', _id))
+    p = 'parents.' + cls.__name__
+    r = []
+    for i in cls._find_multi_simple({
+      p: _id,
+      'active': True,
+      '_meta._valid': True}):
+      if i:
+        r.append(i)
+    log.d(('_get_children', r))
+    return r
   
   def _set_parents(self):
     '''
@@ -272,6 +315,7 @@ class base:
   
     True means same class parents are set implicitly
     '''
+    log.d(('_set_parents', self.data))
     if 'parents' not in self.data:
       self.data['parents'] = {}
     if self._class not in self.data['parents']:
@@ -279,27 +323,154 @@ class base:
     if self.IMPLICIT_PARENTS:
       #force clear submitted parents
       self.data['parents'][self._class] = []
-      for i in self._get_parents():
-        self.data['parents'][self._class].append(i['_id'])
+      for i in self._C_C_get_parents():
+        self.data['parents'][self._class].append(str(i['_id']))
     elif self.data['parents'][self._class] == []:
       #only set parents if missing
-      for i in self._get_parents():
-        self.data['parents'][self._class].append(i['_id'])
+      for i in self._C_C_get_parents():
+        self.data['parents'][self._class].append(str(i['_id']))
+    log.d(('_set_parents', self.data))
+  
+  def _add_access(self, added):
+    '''
+    in added['access'] walks through
+      ['delete', 'get', 'patch', 'post', 'put']
+    and if is missing in self.data['access']
+      then is added
+    
+    to be used from iside _set_access
+    '''
+    if 'delete' in added['access']:
+      for i in added['access']['delete']:
+        self.data['access']['delete'].append(i)
+    if 'get' in added['access']:
+      for i in added['access']['get']:
+        self.data['access']['get'].append(i)
+    if 'patch' in added['access']:
+      for i in added['access']['patch']:
+        present = False
+        for j in self.data['access']['patch']:
+          if i['match'] == j['match']:
+            present = True
+            for ii in i['patch']:
+              if ii not in j['patch']:
+                j['patch'].append(ii)
+        if not present:
+          self.data['access']['patch'].append(i)
+    if 'post' in added['access']:
+      for i in added['access']['post']:
+        self.data['access']['post'].append(i)
+    if 'put' in added['access']:
+      for i in added['access']['put']:
+        self.data['access']['put'].append(i)
+      
+  
+  def _set_access(self):
+    '''
+    root access is added always first
+    
+    if some access was defined,
+      then it is preserved,
+      to allow redefine access,
+      be careful to not accidentaly loose access
+    else
+      access from parents of the
+      same class is added
+    
+    _set_access should be callef AFTER _set_parents
+    '''
+    log.d(('_set_access', self.data))
+    missing = False
+    if 'access' not in self.data or not self.data['access']:
+      #access not present, create
+      missing = True
+      self.data['access'] = {}
+    else:
+      #acces present, check attributes
+      for i in self.data['access']:
+        if i not in ['delete', 'get', 'patch', 'post', 'put']:
+          raise AttributeError(f'_set_access: unknown access {i}')
+    #create all attributes if missing
+    if 'delete' not in self.data['access']:
+      self.data['access']['delete'] = []
+    if 'get' not in self.data['access']:
+      self.data['access']['get'] = []
+    if 'patch' not in self.data['access']:
+      self.data['access']['patch'] = []
+    if 'post' not in self.data['access']:
+      self.data['access']['post'] = []
+    if 'put' not in self.data['access']:
+      self.data['access']['put'] = []
+    #get root access
+    a = {}
+    r = g.group.find_one(
+        {'name': 'root_delete', '_meta._valid': True},
+        projection={'_id': 1})
+    a['delete'] = [str(r['_id'])]
+    r = g.group.find_one(
+        {'name': 'root_get', '_meta._valid': True},
+        projection={'_id': 1})
+    a['get'] = [str(r['_id'])]
+    r = g.group.find_one(
+        {'name': 'root_patch', '_meta._valid': True},
+        projection={'_id': 1})
+    a['patch'] = [{'match': '.', 'patch': [str(r['_id'])]}]
+    r = g.group.find_one(
+        {'name': 'root_post', '_meta._valid': True},
+        projection={'_id': 1})
+    a['post'] = [str(r['_id'])]
+    r = g.group.find_one(
+        {'name': 'root_put', '_meta._valid': True},
+        projection={'_id': 1})
+    a['put'] = [str(r['_id'])]
+    #add root access
+    self._add_access({'access': a})
+    #
+    if missing:
+      #add access from parents of the same class
+      for i in self.data['parents'][self._class]:
+        r = self._find_one({'_id': i})
+        self._add_access(r)
+    log.d(('_set_access', self.data))
   
   def _insert_one(self):
     '''
-    method must be defined by child class,
     saves document and returns _id
     '''
+    log.d(('_insert_one', self.data))
     col = getattr(g, self._class)
-    return col.insert_one(self.data).inserted_id
+    r = col.insert_one(self.data).inserted_id
+    if not r:
+      raise Exception('_insert_one: Could not insert document')
+    log.d(('_insert_one', r))
+    return r
   
-  def _already_exists(self, data):
+  def _update_one(self, data = None):
+    '''
+    update document identified by self.data['_id'],
+    if data is None, then
+      self.data is used to replace document
+    else
+     {'$set': data} is used to update document
+    '''
+    log.d(('_update_one', self.data, data))
+    col = getattr(g, self._class)
+    if data:
+      r = col.update_one({'_id': self.data['_id']}, {'$set': data})
+    else:
+      r = col.update_one({'_id': self.data['_id']}, data)
+    if r.modified_count != 1:
+      log.e(('_update_one', self.data, data))
+      raise Exception('_update_one: Could not update document')
+    log.i(('_update_one', self.data, data))
+    return True
+  
+  def _C_C_already_exists(self, data):
     '''
     method must be defined by child class,
     returns True if already exists
     '''
-    log.i('_already_exists')
+    log.i('_C_C_already_exists')
     raise NotImplementedError()
   
   @classmethod
@@ -320,13 +491,22 @@ class base:
     col = getattr(g, cls.__name__)
     return col.find(find, projection=projection, sort=sort, skip=skip, limit=limit)
   
-  @staticmethod
-  def json_one(data):
+  @classmethod
+  def _find_multi_simple(cls, find):
     '''
-    print debug and returns data
+    find and return list of documents
     '''
-    log.d(data)
-    return data
+    col = getattr(g, cls.__name__)
+    return col.find(find)
+  
+  def json_one(self):
+    '''
+    print debug and returns self.data
+    '''
+    log.d(('json_one', self.data))
+    self.data.pop('_bin', None)
+    log.d(('json_one', self.data))
+    return self.data
   
   @staticmethod
   def json_multi(data):
@@ -337,7 +517,7 @@ class base:
     if data:
       for i in data:
         a.append(i)
-    log.d(a)
+    log.d(('json_multi', a))
     return a
   
   @staticmethod
@@ -354,24 +534,39 @@ class base:
   @validate_user_access_get
   def post(cls, data):
     '''
-    create document
-    
-    check if already exists
+    create document if not exists
     
     TODO
     '''
+    log.d(('post', data))
     a = cls(data)
-    if a._already_exists():
+    if a._C_C_already_exists():
       return e409('already exists')
     a._set_parents()
     a.data['_meta']['_version'] = 1
-    #TODO _set_access
+    a.data['_meta']['_uuid_valid'] = a.data['_id']
+    a._set_access()
+    a._insert_one()
+    log.i(('post', a.data))
     #TODO change parents and childs
-    _id = str(a._insert_one())
-    a.data['_meta']['_version'] = _id
-    #TODO update_one
-    return cls(_id, 'db'), 201
-
+    if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
+      #check if parent't children are own children
+      for i in a.data['parents'][a._class]:
+        for ii in cls._get_children(i):
+          if a._I_P_is_parent_of(ii):
+            b = cls(ii, 'copy')
+            print(type(b))
+            print(b)
+            #parents
+            p = b.data['parents']
+            #remove old parent
+            p[a._class].remove(ii)
+            #add new parent
+            p[a._class].append(a.data['_id'])
+            #update
+            b._update_one()
+    return a.json_one(), 201
+  
   @classmethod
   @connect_db
   @validate_provider
@@ -390,41 +585,39 @@ class base:
     Attributes description:
     https://docs.mongodb.com/manual/reference/operator/query/
     '''
-    try:
-      log.d(('get', _id, find, projection, sort, skip, limit, kwargs))
-      if _id:
-        _id = UUID(_id)
-      if find:
-        find = loads(find)
-        assert type(find) is dict
-      else:
-        find = {'_meta._valid': True}
-      if projection:
-        projection = loads(projection)
-        assert type(projection) is dict
-        #binary hook
-        projection.pop('_bin', None)
-      else:
-        #binary hook
-        projection = {'_bin': 0}
-      if sort:
-        sort = loads(sort)
-        assert type(sort) is dict
-        sort = [(i, sort[i]) for i in sort]
-      log.d(('get', _id, find, projection, sort, skip, limit, kwargs))
-      if _id:
-        a = cls._find_one({'_id': _id}, projection=projection)
-        if a:
-          return base.json_one(a)
-        #404
-        log.e(('get', _id, find, projection, sort, skip, limit, kwargs))
-        return e404(f'get {_id}')
-      else:
-        a = cls._find_multi(find, projection=projection, sort=sort, skip=skip, limit=limit)
-        #always return list, not 404
-        return base.json_multi(a), 200
-    except Exception as e:
-      return e400(e)
+    log.d(('get', _id, find, projection, sort, skip, limit, kwargs))
+    if _id:
+      _id = UUID(_id)
+    if find:
+      find = loads(find)
+      assert type(find) is dict
+    else:
+      find = {'_meta._valid': True}
+    if projection:
+      projection = loads(projection)
+      assert type(projection) is dict
+      #binary hook
+      projection.pop('_bin', None)
+    else:
+      #binary hook
+      projection = {'_bin': 0}
+    if sort:
+      sort = loads(sort)
+      assert type(sort) is dict
+      sort = [(i, sort[i]) for i in sort]
+    log.d(('get', _id, find, projection, sort, skip, limit, kwargs))
+    if _id:
+      a = cls._find_one({'_id': _id}, projection=projection)
+      if a:
+        log.d(('get', a))
+        return a
+      #404
+      log.e(('get', _id, find, projection, sort, skip, limit, kwargs))
+      return e404(f'get {_id}')
+    else:
+      a = cls._find_multi(find, projection=projection, sort=sort, skip=skip, limit=limit)
+      #always return list, not 404
+      return base.json_multi(a), 200
   
   @classmethod
   @connect_db

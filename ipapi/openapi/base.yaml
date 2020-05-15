@@ -290,6 +290,20 @@ components:
         type: string
         format: uuid
     
+    UUIDsPatch:
+      description: Array of items, each item is object containing match and list of UUIDs
+      type: array
+      items:
+        type: object
+        properties:
+          match:
+            type: string
+            description: "Contains regular expression used to match patched property, see https://docs.python.org/3/library/re.html. (One additional level of object is caused by bson.errors.InvalidDocument: key '.' must not contain '.')"
+            minLength: 1
+            maxLength: 256
+          patch:
+            $ref: "#/components/schemas/UUIDs"
+    
     ArrayOfTime:
       description: Array of time items
       type: array
@@ -411,7 +425,7 @@ components:
           additionalProperties: false
         access:
           type: object
-          description: Object containing get/post/put/delete/patch access definitions. The get/post/put/delete contains array of allowed Role UUIDs. PATCH is object additionally containig allowed properties using regular expression, each containing array of Role UUIDs
+          description: Object containing get/post/put/delete/patch access definitions. The get/post/put/delete contains array of allowed Role UUIDs. PATCH is array of items, each item is object containing match and list of UUIDs
           properties:
             get:
               $ref: "#/components/schemas/UUIDs"
@@ -422,10 +436,7 @@ components:
             delete:
               $ref: "#/components/schemas/UUIDs"
             patch:
-              type: object
-              description: Regular expression defining allowed property #TODO
-              additionalProperties:
-                $ref: "#/components/schemas/UUIDs"
+              $ref: "#/components/schemas/UUIDsPatch"
           additionalProperties: false
     
     ipv4:
