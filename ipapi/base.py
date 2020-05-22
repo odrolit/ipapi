@@ -163,6 +163,10 @@ class base:
       self.data = data
       self._set_meta()
     elif self.data_source in ['db', 'copy']:
+      #usually we get _id as type str,
+      #but we allow _id to be type UUID,
+      #UUID(UUID(_id)) throws exception
+      data = str(data)
       self.data = self._find_one({'_id': UUID(data)})
       if not self.data:
         raise AttributeError(f'Not found {self._class} {data}')
@@ -170,16 +174,19 @@ class base:
       raise AttributeError(f'Unknown data_source {data_source}')
     if self.data_source == 'copy':
       #save old copy
-      old_id = self.data['_id'] = uuid4()
+      self.data['_id'] = uuid4()
       self.data['_meta']['_valid'] = False
-      old_now = self.data['_meta']['_valid_to'] = datetime.now()
+      self.data['_meta']['_valid_to'] = datetime.now()
       self._insert_one()
       #make new
+      old_id = deepcopy(self.data['_id'])
+      old_now = deepcopy(self.data['_meta']['_valid_to'])
+      old_version = deepcopy(self.data['_meta']['_version'])
       self._set_meta()
       self.data['_id'] = UUID(data)
       self.data['_meta']['_valid_from'] = old_now
       self.data['_meta']['_uuid_previous'] = old_id
-      self.data['_meta']['_version'] += 1
+      self.data['_meta']['_version'] = old_version + 1
     log.d(('__init__', self._class, self.data_source, data))
   
   def _set_meta(self):
@@ -445,24 +452,32 @@ class base:
     log.d(('_insert_one', r))
     return r
   
-  def _update_one(self, data = None):
+  def _replace_one(self):
+    '''
+    replace document identified by self.data['_id'],
+    self.data is used to replace document
+    '''
+    log.d(('_replace_one', self.data))
+    col = getattr(g, self._class)
+    r = col.replace_one({'_id': self.data['_id']}, self.data)
+    if r.modified_count != 1:
+      log.e(('_replace_one', self.data))
+      raise Exception('_replace_one: Could not update document')
+    log.i(('_replace_one', self.data))
+    return True
+  
+  def _update_one_set(self, data):
     '''
     update document identified by self.data['_id'],
-    if data is None, then
-      self.data is used to replace document
-    else
-     {'$set': data} is used to update document
+    {'$set': data} is used to update document
     '''
-    log.d(('_update_one', self.data, data))
+    log.d(('_update_one_set', self.data, data))
     col = getattr(g, self._class)
-    if data:
-      r = col.update_one({'_id': self.data['_id']}, {'$set': data})
-    else:
-      r = col.update_one({'_id': self.data['_id']}, data)
+    r = col.update_one({'_id': self.data['_id']}, {'$set': data})
     if r.modified_count != 1:
-      log.e(('_update_one', self.data, data))
-      raise Exception('_update_one: Could not update document')
-    log.i(('_update_one', self.data, data))
+      log.e(('_update_one_set', self.data, data))
+      raise Exception('_update_one_set: Could not update document')
+    log.i(('_update_one_set', self.data, data))
     return True
   
   def _C_C_already_exists(self, data):
@@ -470,7 +485,7 @@ class base:
     method must be defined by child class,
     returns True if already exists
     '''
-    log.i('_C_C_already_exists')
+    log.e('_C_C_already_exists')
     raise NotImplementedError()
   
   @classmethod
@@ -478,10 +493,14 @@ class base:
     '''
     find and return one document
     '''
+    log.d(('_find_one', cls.__name__, find, projection))
     col = getattr(g, cls.__name__)
     if projection:
-      return col.find_one(find, projection=projection)
-    return col.find_one(find)
+      r = col.find_one(find, projection=projection)
+    else:
+      r = col.find_one(find)
+    log.d(('_find_one', cls.__name__, r))
+    return r
   
   @classmethod
   def _find_multi(cls, find, projection, sort, skip, limit):
@@ -536,7 +555,7 @@ class base:
     '''
     create document if not exists
     
-    TODO
+    TODO check for parental loops
     '''
     log.d(('post', data))
     a = cls(data)
@@ -548,23 +567,20 @@ class base:
     a._set_access()
     a._insert_one()
     log.i(('post', a.data))
-    #TODO change parents and childs
     if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
-      #check if parent't children are own children
+      #check if parent's children are own children
       for i in a.data['parents'][a._class]:
         for ii in cls._get_children(i):
           if a._I_P_is_parent_of(ii):
-            b = cls(ii, 'copy')
-            print(type(b))
-            print(b)
+            b = cls(ii['_id'], 'copy')
             #parents
             p = b.data['parents']
             #remove old parent
-            p[a._class].remove(ii)
+            p[a._class].remove(i)
             #add new parent
-            p[a._class].append(a.data['_id'])
+            p[a._class].append(str(a.data['_id']))
             #update
-            b._update_one()
+            b._replace_one()
     return a.json_one(), 201
   
   @classmethod
@@ -624,31 +640,44 @@ class base:
   @validate_provider
   @validate_user
   @validate_user_access_get
-  def delete(cls, _id, data):
+  def delete(cls, _id, **kwargs):
     '''
     delete document identified by _id
     by setting active = False
-    
-    data must contain _user_ip and _user_name
     '''
-    log.d('old')
-    log.d(_id)
+    log.d(('delete', _id, kwargs))
     old = cls._find_one({'_id': UUID(_id)})
     if not old:
-      return e404(f'delete {_id}')
+      return e404(f'delete {_id} not found')
+    if not old['_meta']['_valid']:
+      return e409(f'delete {_id} not valid')
     if not old['active']:
-      return e409(f'already deleted {_id}')
-    new = cls(cls._find_one({'_id': UUID(_id)}))
-    pprint(new)
-    log.d('new')
-    log.d(new.data['_id'])
-    new.data['active'] = False
-    new._insert_one()
-    log.i(new.data)
+      return e409(f'delete {_id} already deleted')
+    if _id in old['parents'][cls.__name__]:
+      return e409(f'delete {_id} root not allowed')
+    if not cls.IMPLICIT_PARENTS:
+      #active children are not allowed
+      for i in cls._get_children(_id):
+        if i['_meta']['_valid']:
+          return e409(f'delete {_id} active child {i["_id"]}')
+    a = cls(_id, 'copy')
+    a.data['active'] = False
+    #update
+    a._replace_one()
+    log.i(('delete', _id, a.data))
+    if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
+      #move own children to parents
+      for i in cls._get_children(_id):
+        b = cls(i['_id'], 'copy')
+        #parents
+        p = b.data['parents']
+        #remove old parent
+        p[a._class].remove(_id)
+        #add new parents
+        for ii in a.data['parents'][a._class]:
+          p[a._class].append(str(ii))
+        #update
+        b._replace_one()
     return NoContent, 204
-    #except
-    log.i('delete')
-    return NoContent, 404
-
 
 

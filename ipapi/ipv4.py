@@ -33,10 +33,14 @@ class ipv4(base):
     '''
     returns True if already exists
     '''
-    if self._find_one({'name': self.data['name'],
+    log.d(('_C_C_already_exists'))
+    r = self._find_one({'name': self.data['name'],
                        'prefix': self.data['prefix'],
-                       'scope': self.data['scope']}):
+                       'scope': self.data['scope']})
+    if r:
+      log.d(('_C_C_already_exists', r))
       return True
+    log.d(('_C_C_already_exists', None))
 
   def _C_C_get_parents(self):
     '''
@@ -79,7 +83,10 @@ class Ipv4View(MethodView):
       return e400(e)
   
   def post(self):
-    return ipv4.post(request.json)
+    try:
+      return ipv4.post(request.json)
+    except Exception as e:
+      return e400(e)
 
   
   def put(self, id):
@@ -94,8 +101,8 @@ class Ipv4View(MethodView):
     aaa['time']  = datetime.now()
     return aaa, 201
   
-  def delete(self, _id):
-    return ipv4.delete(_id, request.json)
+  def delete(self, **kwargs):
+    return ipv4.delete(**kwargs)
 
   
   def search(self, **kwargs):
