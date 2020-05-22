@@ -275,12 +275,15 @@ components:
       - detail
       - status
       - title
+      - type
       properties:
         detail:
           type: string
         status:
           type: integer
         title:
+          type: string
+        type:
           type: string
     
     UUIDs:
