@@ -14,7 +14,7 @@ servers:
 paths:
   /ipv4:
     get:
-      summary: List all documents
+      summary: List documents
       tags:
       - ipv4
       parameters:
@@ -34,7 +34,7 @@ paths:
           $ref: "#/components/schemas/ip"
       - name: find
         in: query
-        description: 'Query example {"name": "1.1.1.1"} https://docs.mongodb.com/manual/reference/operator/query/'
+        description: 'Query example {"name": "1.1.1.1"}, {"parents.blacklistv4": {"$exists": true, "$ne": []}}, https://docs.mongodb.com/manual/reference/operator/query/'
         required: false
         schema:
           type: string
@@ -64,11 +64,17 @@ paths:
           type: integer
       responses:
         '200':
-          description: Array of documents
+          description: List of documents
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4s"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Error
           content:
@@ -78,7 +84,7 @@ paths:
       security:
       - api_key: []
     post:
-      summary: Create document
+      summary: Create document if not exists
       tags:
       - ipv4
       requestBody:
@@ -94,6 +100,61 @@ paths:
             application/json:
               schema:
                 $ref: "#components/schemas/ipv4"
+        '409':
+          description: Document already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/Error"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+      - api_key: []
+    patch:
+      summary: Patch document or create if not exists
+      tags:
+      - ipv4
+      requestBody:
+        description: Patch or create document
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ipv4"
+      responses:
+        '200':
+          description: Document patched
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/ipv4"
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/ipv4"
+        '409':
+          description: Document not patched or created
+          content:
+            application/json:
+              schema:
+                $ref: "#components/schemas/Error"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Error
           content:
@@ -137,11 +198,23 @@ paths:
           type: string
       responses:
         '200':
-          description: Document details
+          description: Single document if searched by _id, or list of documents (can be empty)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4"
+        '404':
+          description: Document not found if searched by _id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Error
           content:
@@ -183,6 +256,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4"
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '409':
+          description: Document not deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Error
           content:
@@ -192,10 +283,24 @@ paths:
       security:
       - api_key: []
     put:
-      summary: Document update
+      summary: Document update or create if not exists
       tags:
       - ipv4
       parameters:
+      - name: _user_name
+        in: query
+        description: User name must be set to actual user
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+      - name: _user_ip
+        in: query
+        description: User ip must be set to ipv4 or IPv6 address of actual user
+        required: true
+        schema:
+          $ref: "#/components/schemas/ip"
       - name: _id
         in: path
         description: The _id of document
@@ -204,12 +309,30 @@ paths:
           type: string
           format: uuid
       responses:
-        '201':
+        '200':
           description: Document updated
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4"
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4"
+        '409':
+          description: Document not updated or created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Error
           content:
@@ -294,14 +417,14 @@ components:
         format: uuid
     
     UUIDsPatch:
-      description: Array of items, each item is object containing match and list of UUIDs
+      description: Array of items containing match regexp and list of UUIDs allowed to patch
       type: array
       items:
         type: object
         properties:
           match:
             type: string
-            description: "Contains regular expression used to match patched property, see https://docs.python.org/3/library/re.html. (One additional level of object is caused by bson.errors.InvalidDocument: key '.' must not contain '.')"
+            description: "Contains regular expression used to match patched property, see https://docs.python.org/3/library/re.html. (One additional level of object is caused by bson.errors.InactiveDocument: key '.' must not contain '.')"
             minLength: 1
             maxLength: 256
           patch:
@@ -335,10 +458,6 @@ components:
           minLength: 1
           maxLength: 256
           description: Set to ID of the document, e.g. 1.1.1.1
-        active:
-          type: boolean
-          description: Set true for active document, false for deleted
-          default: true
         description:
           type: string
           description: Description of the document
@@ -367,9 +486,13 @@ components:
           format: uuid
           description: UUID remains unchanged after document update and is used in access, parents and _meta. The property is placed here because of the mongodb 
           readOnly: true
+        _bin:
+          type: object
+          description: Internal data set by application. Application use them for effective database queries and for indexing. Those data are stripped from other data exposed by API.
+          readOnly: true
         _meta:
           type: object
-          description: Valid document has _valid set to true. This is safe for crash, as the old document is saved first and becomes stub with _valid set to false. The old version would have contain the same highest _version and _valid_from
+          description: Internal data set by application. Active/newest document has _active set to true. (This is safe for crash, as the old document is saved first and becomes stub with _active set to false. The old version would have contain the same highest _version and _active_from.) Valid/nondeleted document has _valid set to true.
           readOnly: true
           properties:
             _class:
@@ -380,15 +503,20 @@ components:
               readOnly: true
             _valid:
               type: boolean
+              description: Set true for the valid document, false for deleted
+              default: true
+              readOnly: true
+            _active:
+              type: boolean
               description: Set true for the last version of document, false for old
               default: true
               readOnly: true
-            _valid_from:
+            _active_from:
               type: string
               format: time
               description: Date of the document modification
               readOnly: true
-            _valid_to:
+            _active_to:
               type: string
               format: time
               description: Date of the document modification
@@ -397,15 +525,15 @@ components:
               type: integer
               description: Document version is increased by one after each update, one for first document
               readOnly: true
-            _uuid_valid:
+            _uuid_active:
               type: string
               format: uuid
-              description: UUID of the valid document, same as _id for first document. This requires one additional update for first document, which is outweighted by search efficiency
+              description: UUID of the active document, same as _id for first document. This requires one additional update for first document, which is outweighted by search efficiency
               readOnly: true
             _uuid_previous:
               type: string
               format: uuid
-              description: UUID of the previous valid document, same as _id for first document. This value we get free from mongodb when saving old document and can be used for cheap restrospective walk
+              description: UUID of the previous active document, same as _id for first document. This value we get free from mongodb when saving old document and can be used for cheap restrospective walk
               readOnly: true
             _provider_name:
               type: string

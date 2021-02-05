@@ -58,14 +58,14 @@ with app.app.app_context():
       data['description'] = f'Root {i} document'
       if i == 'ipv4':
         db[i].create_index([('scope', 1), 
-                            ('_meta._first', 1), 
-                            ('_meta._last', 1)])
+                            ('_bin._first', 1), 
+                            ('_bin._last', 1)])
         data['name'] = '0.0.0.0'
         data['prefix'] = 0
         data['scope'] = 'global'
         ii = ipapi.ipv4(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['ipv4'] = [ii.data['_id']]
         root_ipv4 = db.ipv4.insert_one(ii.data).inserted_id
@@ -74,7 +74,7 @@ with app.app.app_context():
         data['name'] = 'root'
         ii = ipapi.user(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['user'] = [ii.data['_id']]
         root_user = db.user.insert_one(ii.data).inserted_id
@@ -83,7 +83,7 @@ with app.app.app_context():
         data['name'] = 'root'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [ii.data['_id']]
         root_group = db.group.insert_one(ii.data).inserted_id
@@ -92,7 +92,7 @@ with app.app.app_context():
         data['name'] = 'root_delete'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [root_group]
         root_delete_group = db.group.insert_one(ii.data).inserted_id
@@ -101,7 +101,7 @@ with app.app.app_context():
         data['name'] = 'root_get'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [root_group]
         root_get_group = db.group.insert_one(ii.data).inserted_id
@@ -110,7 +110,7 @@ with app.app.app_context():
         data['name'] = 'root_patch'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [root_group]
         root_patch_group = db.group.insert_one(ii.data).inserted_id
@@ -119,7 +119,7 @@ with app.app.app_context():
         data['name'] = 'root_post'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [root_group]
         root_post_group = db.group.insert_one(ii.data).inserted_id
@@ -128,7 +128,7 @@ with app.app.app_context():
         data['name'] = 'root_put'
         ii = ipapi.group(data, 'database_initialization')
         ii.data['_meta']['_version'] = 1
-        ii.data['_meta']['_uuid_valid'] = ii.data['_id']
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
         ii.data['parents'] = {}
         ii.data['parents']['group'] = [root_group]
         root_put_group = db.group.insert_one(ii.data).inserted_id

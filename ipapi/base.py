@@ -4,7 +4,7 @@ from connexion.resolver import MethodViewResolver
 from flask import request, g, current_app
 from flask.views import MethodView
 from ipaddress import ip_address, ip_network, IPv4Address, IPv6Address, IPv4Network, IPv6Network 
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from uuid import uuid4, UUID
 from json import loads
 from bson import json_util
@@ -85,6 +85,19 @@ def e401(detail):
   log.e(e)
   return e
 
+def e403(detail):
+  '''
+  logs error and returns data in json
+  '''
+  e = {
+    "detail": str(detail),
+    "status": 403,
+    "title": "Access denied",
+    "type": "about:blank"
+    }, 403
+  log.e(e)
+  return e
+
 def e404(detail):
   '''
   logs error and returns data in json
@@ -114,6 +127,10 @@ def e409(detail):
 class base:
   '''
   basic properties and functions
+  
+  child class must define:
+  - _C_C_get_active()
+  - _C_C_get_active_valid_parents()
   '''
   
   IMPLICIT_PARENTS = False
@@ -126,7 +143,17 @@ class base:
   True means same class parents are set implicitly,
   following funcions must be then defined:
   - _I_P_is_leaf()
-  - _I_P_is_parent_of(parent)
+  - _I_P_is_parent_of(child)
+  - _I_P_is_equal_to(second)
+  '''
+  
+  PRIVATE_PROPERTIES = ['_id', '_meta', '_bin']
+  '''
+  PRIVATE_PROPERTIES
+  
+  Contains propertis not allwed to patch
+  using patch method, can be extended
+  in child classes as needed
   '''
   
   def __init__(self, data, data_source = 'request'):
@@ -137,6 +164,7 @@ class base:
     - request (default)
     - db
     - copy
+    - database_initialization (only for db initialization)
         
     request (default)
     - accept dict as data
@@ -148,13 +176,19 @@ class base:
     
     copy
     - accept _id as data
-    - get data from db, change _meta._valid,
-      _meta._valid_to and _id and saves it
+    - get data from db, change _meta._active,
+      _meta._active_to and _id and saves it
       as new document
     - _set_meta according to request,
-      restore original _id, adjust _meta._valid_from,
+      restore original _id, adjust _meta._active_from,
       _meta._uuid_previous, _meta._version
       and return it for other modification
+    
+    copy_trust
+    - same as copy, the data are passed
+      and not retrieved from db
+    - we trust that data are correct
+      and only active object are processed
     '''
     self.data_source = data_source
     self._class = self.__class__.__name__
@@ -168,23 +202,27 @@ class base:
       #UUID(UUID(_id)) throws exception
       data = str(data)
       self.data = self._find_one({'_id': UUID(data)})
-      if not self.data:
-        raise AttributeError(f'Not found {self._class} {data}')
+    elif self.data_source in ['copy_trust']:
+      self.data = data
     else:
       raise AttributeError(f'Unknown data_source {data_source}')
-    if self.data_source == 'copy':
+    if not self.data:
+      raise AttributeError(f'Not found {self._class} {data}')
+    if self.data_source in ['copy', 'copy_trust']:
+      if not self.data['_meta']['_active']:
+        raise AttributeError(f'Only active objects can be copied {self._class} {data}')
       #save old copy
       self.data['_id'] = uuid4()
-      self.data['_meta']['_valid'] = False
-      self.data['_meta']['_valid_to'] = datetime.now()
+      self.data['_meta']['_active'] = False
+      self.data['_meta']['_active_to'] = datetime.now()
       self._insert_one()
       #make new
       old_id = deepcopy(self.data['_id'])
-      old_now = deepcopy(self.data['_meta']['_valid_to'])
+      old_now = deepcopy(self.data['_meta']['_active_to'])
       old_version = deepcopy(self.data['_meta']['_version'])
       self._set_meta()
       self.data['_id'] = UUID(data)
-      self.data['_meta']['_valid_from'] = old_now
+      self.data['_meta']['_active_from'] = old_now
       self.data['_meta']['_uuid_previous'] = old_id
       self.data['_meta']['_version'] = old_version + 1
     log.d(('__init__', self._class, self.data_source, data))
@@ -203,11 +241,12 @@ class base:
     self.data['_meta']['_provider_ip'] = g._provider_ip
     self.data['_meta']['_class'] = self._class
     self.data['_meta']['_valid'] = True
-    self.data['_meta']['_valid_from'] = datetime.now()
-    self.data['_meta']['_valid_to'] = datetime.max
+    self.data['_meta']['_active'] = True
+    self.data['_meta']['_active_from'] = datetime.now()
+    self.data['_meta']['_active_to'] = datetime.max
     #rest must me set individually
     self.data['_meta']['_version'] = None
-    self.data['_meta']['_uuid_valid'] = None
+    self.data['_meta']['_uuid_active'] = None
     
   def connect_db(f):
     '''
@@ -267,59 +306,118 @@ class base:
     set g._user_name and g._user_ip
     '''
     def wrapper(*args, **kwargs):
-      #TODO
-      if request.method == 'POST':
-        #POST
+      if request.method in ['POST', 'PATCH', 'PUT', 'DELETE']:
         g._user_name = args[1]['_user_name']
         g._user_ip = args[1]['_user_ip']
       else:
-        #GET, PUT, DELETE
+        #GET
         g._user_name = kwargs['_user_name']
         g._user_ip = kwargs['_user_ip']
+      #TODO get user access ids
+      g._user_access = {}
+      g._user_access['get'] = ['jjj']
+      g._user_access['post'] = ['jjj']
+      g._user_access['put'] = ['jjj']
+      g._user_access['patch'] = ['jjj']
+      g._user_access['delete'] = ['jjj']
       return f(*args, **kwargs)
     return wrapper
   
-  def validate_user_access_get(f):
+  @classmethod
+  def _user_has_access(cls, method, data, patch = None):
     '''
-    TODO
+    methods can be get, post, put, patch and delete
+    
+    if method is patch, the patch parameter is required
+    
+    compare if there is intersection in
+    g._user_access['method'] and data['access']['method']
+    and returns bool
     '''
-    def wrapper(*args, **kwargs):
-      return f(*args, **kwargs)
-    return wrapper
+    if method in ['get', 'post', 'put', 'delete']:
+      return any(i in data['access'][method]
+                 for i in g._user_access[method])
+    elif method == 'patch' and patch:
+      for i in patch:
+        #walk through all items in patch
+        for j in data['access']['patch']:
+          #walk through all data access patch rules
+          if match(j['match'], i):
+            #this data access patch rule match to item
+            if any(i in j['patch']
+                   for i in g._user_access['patch']):
+              #success, access for this item is granted
+              break
+        else:
+          #no access for this item
+          return False
+      return True
+    raise Exception('_user_has_access function failed')
   
-  def _C_C_get_parents(self):
+  def _C_C_get_active(self):
+    '''
+    returns valid document or None
+    '''
+    log.e('_C_C_get_active')
+    raise NotImplementedError()
+  
+  def _C_C_get_active_valid_parents(self):
     '''
     method must be defined by child class,
-    returns list containing direct parents or root document
+    returns list containing direct active
+    and valid parents or root document
     '''
-    log.e('_C_C_get_parents')
+    log.e('_C_C_get_active_valid_parents')
     raise NotImplementedError()
   
   @classmethod
-  def _get_children(cls, _id):
+  def _get_children_same_class(cls, _id):
     '''
     returns list containing all
     active and valid children
+    in the same class
     '''
-    log.d(('_get_children', _id))
+    log.d(('_get_children_same_class', _id))
     p = 'parents.' + cls.__name__
     r = []
     for i in cls._find_multi_simple({
       p: _id,
-      'active': True,
-      '_meta._valid': True}):
+      '_meta._valid': True,
+      '_meta._active': True}):
       if i:
         r.append(i)
-    log.d(('_get_children', r))
+    log.d(('_get_children_same_class', r))
+    return r
+  
+  @classmethod
+  def _get_children_all_classes(cls, _id):
+    '''
+    returns list containing all
+    active and valid children
+    in all classes
+    '''
+    log.d(('_get_children_all_classes', _id))
+    p = 'parents.' + cls.__name__
+    q = {'_meta._valid': True,
+         '_meta._active': True,
+         p: _id}
+    r = {}
+    for i in base.collections():
+      r[i] = []
+      for j in base._find_multi_simple_other_class(j, q):
+        if j:
+          r[i].append(str(j))
+    log.d(('_get_children_all_classes', r))
     return r
   
   def _set_parents(self):
     '''
+    
     IMPLICIT_PARENTS
-
+    
     False means user defined same class parents
     are preserved or added if missing
-  
+    
     True means same class parents are set implicitly
     '''
     log.d(('_set_parents', self.data))
@@ -330,11 +428,11 @@ class base:
     if self.IMPLICIT_PARENTS:
       #force clear submitted parents
       self.data['parents'][self._class] = []
-      for i in self._C_C_get_parents():
+      for i in self._C_C_get_active_valid_parents():
         self.data['parents'][self._class].append(str(i['_id']))
     elif self.data['parents'][self._class] == []:
       #only set parents if missing
-      for i in self._C_C_get_parents():
+      for i in self._C_C_get_active_valid_parents():
         self.data['parents'][self._class].append(str(i['_id']))
     log.d(('_set_parents', self.data))
   
@@ -345,7 +443,7 @@ class base:
     and if is missing in self.data['access']
       then is added
     
-    to be used from iside _set_access
+    to be used from INSIDE _set_access
     '''
     if 'delete' in added['access']:
       for i in added['access']['delete']:
@@ -411,24 +509,34 @@ class base:
     #get root access
     a = {}
     r = g.group.find_one(
-        {'name': 'root_delete', '_meta._valid': True},
+        {'name': 'root_delete', '_meta._active': True},
         projection={'_id': 1})
+    if not r:
+      raise Exception('_set_access: Database corrupted, missing root_delete')
     a['delete'] = [str(r['_id'])]
     r = g.group.find_one(
-        {'name': 'root_get', '_meta._valid': True},
+        {'name': 'root_get', '_meta._active': True},
         projection={'_id': 1})
+    if not r:
+      raise Exception('_set_access: Database corrupted, missing root_get')
     a['get'] = [str(r['_id'])]
     r = g.group.find_one(
-        {'name': 'root_patch', '_meta._valid': True},
+        {'name': 'root_patch', '_meta._active': True},
         projection={'_id': 1})
+    if not r:
+      raise Exception('_set_access: Database corrupted, missing root_patch')
     a['patch'] = [{'match': '.', 'patch': [str(r['_id'])]}]
     r = g.group.find_one(
-        {'name': 'root_post', '_meta._valid': True},
+        {'name': 'root_post', '_meta._active': True},
         projection={'_id': 1})
+    if not r:
+      raise Exception('_set_access: Database corrupted, missing root_post')
     a['post'] = [str(r['_id'])]
     r = g.group.find_one(
-        {'name': 'root_put', '_meta._valid': True},
+        {'name': 'root_put', '_meta._active': True},
         projection={'_id': 1})
+    if not r:
+      raise Exception('_set_access: Database corrupted, missing root_put')
     a['put'] = [str(r['_id'])]
     #add root access
     self._add_access({'access': a})
@@ -446,10 +554,10 @@ class base:
     '''
     log.d(('_insert_one', self.data))
     col = getattr(g, self._class)
-    r = col.insert_one(self.data).inserted_id
+    r = col.insert_one(self.data, session=g.sess).inserted_id
     if not r:
       raise Exception('_insert_one: Could not insert document')
-    log.d(('_insert_one', r))
+    log.i(('_insert_one', r))
     return r
   
   def _replace_one(self):
@@ -459,12 +567,12 @@ class base:
     '''
     log.d(('_replace_one', self.data))
     col = getattr(g, self._class)
-    r = col.replace_one({'_id': self.data['_id']}, self.data)
+    r = col.replace_one({'_id': self.data['_id']}, self.data, session=g.sess)
     if r.modified_count != 1:
       log.e(('_replace_one', self.data))
       raise Exception('_replace_one: Could not update document')
-    log.i(('_replace_one', self.data))
-    return True
+    log.i(('_replace_one', r))
+    return r
   
   def _update_one_set(self, data):
     '''
@@ -473,20 +581,12 @@ class base:
     '''
     log.d(('_update_one_set', self.data, data))
     col = getattr(g, self._class)
-    r = col.update_one({'_id': self.data['_id']}, {'$set': data})
+    r = col.update_one({'_id': self.data['_id']}, {'$set': data}, session=g.sess)
     if r.modified_count != 1:
       log.e(('_update_one_set', self.data, data))
       raise Exception('_update_one_set: Could not update document')
     log.i(('_update_one_set', self.data, data))
     return True
-  
-  def _C_C_already_exists(self, data):
-    '''
-    method must be defined by child class,
-    returns True if already exists
-    '''
-    log.e('_C_C_already_exists')
-    raise NotImplementedError()
   
   @classmethod
   def _find_one(cls, find, projection = None):
@@ -513,10 +613,71 @@ class base:
   @classmethod
   def _find_multi_simple(cls, find):
     '''
-    find and return list of documents
+    find and return list of documents of this class
     '''
     col = getattr(g, cls.__name__)
     return col.find(find)
+  
+  @staticmethod
+  def _find_multi_simple_other_class(cls, find):
+    '''
+    find and return list of documents of defined class
+    '''
+    col = getattr(g, cls)
+    return col.find(find)
+
+  def _document_become_valid(self, cls):
+    '''
+    should be used after each operation
+    when document become valid
+
+    if IMPLICIT_PARENTS, then check
+      if parent's children are own children,
+        then adopt them
+    
+    TODO abort if same-class parental loops exists
+    '''
+    log.d(('_document_become_valid', cls, self.data))
+    if cls.IMPLICIT_PARENTS and not self._I_P_is_leaf():
+      #check if parent's children are own children
+      for i in self.data['parents'][self._class]:
+        for ii in cls._get_children_same_class(i):
+          if self._I_P_is_parent_of(ii):
+            b = cls(ii['_id'], 'copy')
+            #parents
+            p = b.data['parents']
+            #remove old parent
+            p[self._class].remove(i)
+            #add new parent
+            p[self._class].append(str(self.data['_id']))
+            #update
+            b._replace_one()
+    log.d(('_document_become_valid', cls, self.data))
+  
+  def _document_become_invalid(self, cls):
+    '''
+    should be used after each operation
+    when document become invalid
+    
+    if IMPLICIT_PARENTS and self is not leaf,
+      then get them adopted by parent
+    
+    TODO abor if same-class parental loops exists
+    '''
+    log.d(('_document_become_invalid', cls, self.data))
+    if cls.IMPLICIT_PARENTS and not self._I_P_is_leaf():
+      for i in cls._get_children_same_class(self.data['_id']):
+        b = cls(i['_id'], 'copy')
+        #parents
+        p = b.data['parents']
+        #remove old parent
+        p[self._class].remove(self.data['_id'])
+        #add new parents
+        for ii in self.data['parents'][self._class]:
+          p[self._class].append(str(ii))
+        #update
+        b._replace_one()
+    log.d(('_document_become_invalid', cls, self.data))
   
   def json_one(self):
     '''
@@ -542,7 +703,7 @@ class base:
   @staticmethod
   def collections():
     """
-    Get all collections names
+    get all collections names
     """
     return (i.__name__ for i in base.__subclasses__())
   
@@ -550,53 +711,22 @@ class base:
   @connect_db
   @validate_provider
   @validate_user
-  @validate_user_access_get
-  def post(cls, data):
-    '''
-    create document if not exists
-    
-    TODO check for parental loops
-    '''
-    log.d(('post', data))
-    a = cls(data)
-    if a._C_C_already_exists():
-      return e409('already exists')
-    a._set_parents()
-    a.data['_meta']['_version'] = 1
-    a.data['_meta']['_uuid_valid'] = a.data['_id']
-    a._set_access()
-    a._insert_one()
-    log.i(('post', a.data))
-    if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
-      #check if parent's children are own children
-      for i in a.data['parents'][a._class]:
-        for ii in cls._get_children(i):
-          if a._I_P_is_parent_of(ii):
-            b = cls(ii['_id'], 'copy')
-            #parents
-            p = b.data['parents']
-            #remove old parent
-            p[a._class].remove(i)
-            #add new parent
-            p[a._class].append(str(a.data['_id']))
-            #update
-            b._replace_one()
-    return a.json_one(), 201
-  
-  @classmethod
-  @connect_db
-  @validate_provider
-  @validate_user
-  @validate_user_access_get
   def get(cls, _id = None, find = None, projection = None, sort = None, skip = 0, limit = 0, **kwargs):
     '''
     if _id is specified, get document identified by _id,
     all other paramaters except projection are omitted,
-    404 is returned if nothing found
+    in this case returns:
+      200 if document found
+      404 if not found
     
     else get whole collection with other attributes applied,
-    while only valid documents are returned by default,
-    empty list is returned instead if nothing found
+      if _meta._active is not present in find,
+        then _meta._active: True is added,
+      if _meta._valid is not present in find,
+        then _meta._valid: True is added,
+    then it returns:
+     200 and list of documents, empty list
+      is returned if nothing found
     
     Attributes description:
     https://docs.mongodb.com/manual/reference/operator/query/
@@ -608,7 +738,11 @@ class base:
       find = loads(find)
       assert type(find) is dict
     else:
-      find = {'_meta._valid': True}
+      find = {}
+    if '_meta._active' not in find:
+      find['_meta._active'] = True
+    if '_meta._valid' not in find:
+      find['_meta._valid'] = True
     if projection:
       projection = loads(projection)
       assert type(projection) is dict
@@ -625,6 +759,8 @@ class base:
     if _id:
       a = cls._find_one({'_id': _id}, projection=projection)
       if a:
+        if not cls._user_has_access('get', a):
+          return e403('Access denied for method get')
         log.d(('get', a))
         return a
       #404
@@ -633,51 +769,277 @@ class base:
     else:
       a = cls._find_multi(find, projection=projection, sort=sort, skip=skip, limit=limit)
       #always return list, not 404
-      return base.json_multi(a), 200
+      a = base.json_multi(a)
+      for i in a:
+        if not cls._user_has_access('get', i):
+          a.remove(i)
+      return a, 200
   
   @classmethod
   @connect_db
   @validate_provider
   @validate_user
-  @validate_user_access_get
-  def delete(cls, _id, **kwargs):
+  def post(cls, data):
     '''
-    delete document identified by _id
-    by setting active = False
+    create document if not exists or is deleted, returns:
+      201 document created
+      409 document already exists
+    
+    TODO check for parental loops
+    
+    TODO check access
+    
+    TODO action if parents are added/deleted (blackhole, ..)
+    
     '''
+    log.d(('post', data))
+    with g.ipapi.client.start_session() as s:
+      if 'sess' in g:
+        log.w(f'Session was already registered in g.sess')
+      else:
+        g.sess = s
+        log.d(f'Session was registered to g.sess')
+      with s.start_transaction():
+        a = cls(data)
+        old = a._C_C_get_active()
+        if old and old['_meta']['_valid']:
+          #document already exists
+          return e409('already exists')
+        elif old:
+          #old document was deleted
+          if not cls._user_has_access('post', old):
+            return e403('Access denied for method post')
+          b = cls(old, 'copy_trust')
+          b.data['_meta']['_version'] = old['_meta']['_version'] + 1
+          b.data['_meta']['_uuid_active'] = old
+          for i in PRIVATE_PROPERTIES:
+            self.data[i] = b.data[i]
+          self._set_access()
+          self._replace_one()
+        else:
+          #create
+          self._set_parents()
+          self.data['_meta']['_version'] = 1
+          self.data['_meta']['_uuid_active'] = self.data['_id']
+          self._set_access()
+          if not cls._user_has_access('post', old):
+            return e403('Access denied for method post')
+          self._insert_one()
+        self._document_become_valid(cls)
+        return a.json_one(), 201
+  
+  @classmethod
+  @connect_db
+  @validate_provider
+  @validate_user
+  def patch(cls, data):
+    '''
+    patch document or create if not exists, returns:
+      200 document patched
+      201 document created
+    
+    '''
+    log.d(('patch', data))
+    with g.ipapi.client.start_session() as s:
+      if 'sess' in g:
+        log.w(f'Session was already registered in g.sess')
+      else:
+        g.sess = s
+        log.d(f'Session was registered to g.sess')
+      if 'active' in data and not data['active']:
+        #TODO move check to openapi
+        return e409(f'Delete not allowed, please use delete method instead')
+      with s.start_transaction():
+        a = cls(data)
+        old = a._C_C_get_active()
+        #python 3.8: if old := a._C_C_get_active()
+        if old:
+          '''
+          patch
+          
+          can't use "a", it already contains default values
+          which could overwrite non-default in old document
+          
+          can't use "old", it is not class instance
+          and there is no copy of it
+          '''
+          b = cls(old, 'copy_trust')
+          # PRIVATE_PROPERTIES are guarded by openapi readOnly
+          b.data.update(data)
+          b._set_parents()
+          b._set_access()
+          b._replace_one()
+          if not old['_meta']['_valid']:
+            #old document was deleted
+            self._document_become_valid(cls)
+          return b.json_one(), 200
+        else:
+          #create
+          self._set_parents()
+          self.data['_meta']['_version'] = 1
+          self.data['_meta']['_uuid_active'] = self.data['_id']
+          self._set_access()
+          self._insert_one()
+          self._document_become_valid(cls)
+          return a.json_one(), 201
+  
+  @classmethod
+  @connect_db
+  @validate_provider
+  @validate_user
+  def delete(cls, data):
+    '''
+    delete document by setting active = False
+    '''
+    log.d(('delete', data))
+    with g.ipapi.client.start_session() as s:
+      if 'sess' in g:
+        log.w(f'Session was already registered in g.sess')
+      else:
+        g.sess = s
+        log.d(f'Session was registered to g.sess')
+      with s.start_transaction():
+        a = cls(data)
+        old = a._C_C_get_active()
+        if old and old['_meta']['_valid']:
+          #document exists and is not deleted
+          if old['_id'] in old['parents'][cls.__name__]:
+            return e409(f'delete root {old["_id"]} not allowed')
+            #TODO add to other methods too
+          if cls._get_children_all_classes(old['_id']):
+            raise Exception(f'delete {old["_id"]}: valid children {r}')
+          b = cls(old['_id'], 'copy')
+          b.data['_meta']['_version'] = old['_meta']['_version'] + 1
+          b.data['_meta']['_uuid_active'] = old
+          b.data['_meta']['_valid'] = False
+          b._replace_one()
+        else:
+          #document not exists or deleted
+          return e404(f'delete {_id} not found')
+          self._set_parents()
+          self.data['_meta']['_version'] = 1
+          self.data['_meta']['_uuid_active'] = self.data['_id']
+          self._set_access()
+          self._insert_one()
+        self._document_become_valid(cls)
+        return a.json_one(), 201
     log.d(('delete', _id, kwargs))
-    old = cls._find_one({'_id': UUID(_id)})
-    if not old:
-      return e404(f'delete {_id} not found')
-    if not old['_meta']['_valid']:
-      return e409(f'delete {_id} not valid')
-    if not old['active']:
-      return e409(f'delete {_id} already deleted')
-    if _id in old['parents'][cls.__name__]:
-      return e409(f'delete {_id} root not allowed')
-    if not cls.IMPLICIT_PARENTS:
-      #active children are not allowed
-      for i in cls._get_children(_id):
-        if i['_meta']['_valid']:
-          return e409(f'delete {_id} active child {i["_id"]}')
-    a = cls(_id, 'copy')
-    a.data['active'] = False
-    #update
-    a._replace_one()
-    log.i(('delete', _id, a.data))
-    if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
-      #move own children to parents
-      for i in cls._get_children(_id):
-        b = cls(i['_id'], 'copy')
-        #parents
-        p = b.data['parents']
-        #remove old parent
-        p[a._class].remove(_id)
-        #add new parents
-        for ii in a.data['parents'][a._class]:
-          p[a._class].append(str(ii))
+    with g.ipapi.client.start_session() as s:
+      if 'sess' in g:
+        log.w(f'Session was already registered in g.sess')
+      else:
+        g.sess = s
+        log.d(f'Session was registered to g.sess')
+      with s.start_transaction():
+        old = cls._find_one({'_id': UUID(_id)})
+        if not old:
+          return e404(f'delete {_id} not found')
+        if not old['_meta']['_active']:
+          return e409(f'delete {_id} not valid')
+        if not old['active']:
+          return e409(f'delete {_id} already deleted')
+        if _id in old['parents'][cls.__name__]:
+          return e409(f'delete {_id} root not allowed')
+        if not cls.IMPLICIT_PARENTS:
+          #active children are not allowed
+          for i in cls._get_children_same_class(_id):
+            if i['_meta']['_active']:
+              return e409(f'delete {_id} active child {i["_id"]}')
+        a = cls(_id, 'copy')
+        a.data['active'] = False
         #update
-        b._replace_one()
-    return NoContent, 204
+        a._replace_one()
+        log.i(('delete', _id, a.data))
+        if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
+          #move own children to parents
+          for i in cls._get_children_same_class(_id):
+            b = cls(i['_id'], 'copy')
+            #parents
+            p = b.data['parents']
+            #remove old parent
+            p[a._class].remove(_id)
+            #add new parents
+            for ii in a.data['parents'][a._class]:
+              p[a._class].append(str(ii))
+            #update
+            b._replace_one()
+        #TODO action pokud jsou parents nejake blacklisty?
+        return NoContent, 204
+  
+  @classmethod
+  @connect_db
+  @validate_provider
+  @validate_user
+  def put(cls, data):
+    '''
+    replace document or create document if not exists, returns:
+      200 document replaced
+      201 document created
+    
+    TODO jako ostatni
+    '''
+    log.d(('put', data))
+    with g.ipapi.client.start_session() as s:
+      if 'sess' in g:
+        log.w(f'Session was already registered in g.sess')
+      else:
+        g.sess = s
+        log.d(f'Session was registered to g.sess')
+      if 'active' in data and not data['active']:
+        #TODO add check to openapi
+        return e409(f'Delete not allowed, please use delete method instead')
+      with s.start_transaction():
+        a = cls(data)
+        old = a._C_C_get_active()
+        #python 3.8: if old := a._C_C_get_active()
+        #
+        # old code:
+        #
+        old = cls._find_one({'_id': UUID(_id)})
+        if not old:
+          return e404(f'put {_id} not found')
+        #TODO check below
+        if _id in old['parents'][cls.__name__]:
+          return e409(f'put {_id} root not allowed')
+        a = cls(kwargs)
+        if cls.IMPLICIT_PARENTS and not a._I_P_is_equal_to(old):
+          return e409(f'put {_id} change unique key not allowed for implicit parents')
+        a._set_parents()
+        #?? set _version and _uuid_active ??
+        a._set_access()
+        #update
+        a._replace_one()
+        log.i(('put', _id, a.data))
+        #TODO change to ['active']
+        if not old['_meta']['_active']:
+          #undeleted
+          if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
+            #check if parent's children are own children
+            for i in a.data['parents'][a._class]:
+              for ii in cls._get_children_same_class(i):
+                if a._I_P_is_parent_of(ii):
+                  b = cls(ii['_id'], 'copy')
+                  #parents
+                  p = b.data['parents']
+                  #remove old parent
+                  p[a._class].remove(i)
+                  #add new parent
+                  p[a._class].append(str(a.data['_id']))
+                  #update
+                  b._replace_one()
+        return a.json_one(), 200
 
 
+
+#TODO database_initialization:
+#_meta._uuid_previous
+#active
+#? auto_activate
+#? auto_deactivate
+#? firewall
+#? labels
+#? reverse
+#? whitelisted
+#
+#TODO deleted:
+#_meta._uuid_active

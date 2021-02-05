@@ -29,32 +29,36 @@ class ipv4(base):
       self.data['_bin']['_first'] = n.network_address.packed
       self.data['_bin']['_last'] = n.broadcast_address.packed
   
-  def _C_C_already_exists(self):
+  def _C_C_get_active(self):
     '''
-    returns True if already exists
+    returns active document or None,
+    the document can be valid or deleted
     '''
-    log.d(('_C_C_already_exists'))
-    r = self._find_one({'name': self.data['name'],
-                       'prefix': self.data['prefix'],
-                       'scope': self.data['scope']})
-    if r:
-      log.d(('_C_C_already_exists', r))
-      return True
-    log.d(('_C_C_already_exists', None))
-
-  def _C_C_get_parents(self):
+    log.d(('_C_C_get_active'))
+    r = self._find_one({'_meta._active': True,
+                        'name': self.data['name'],
+                        'prefix': self.data['prefix'],
+                        'scope': self.data['scope']})
+    return r
+  
+  def _C_C_get_active_valid_parents(self):
     '''
-    returns list containing direct parents or root document
+    returns list containing direct active
+    and valid parents or root document
     '''
-    return g.ipv4.find({'_meta._valid': True,
+    log.d(('_C_C_get_active_valid_parents'))
+    r = g.ipv4.find({'_meta._active': True,
+                     '_meta._valid': True,
                      'scope': self.data['scope'],
                      '_bin._first': {'$lte': self.data['_bin']['_first']},
                      '_bin._last': {'$gte': self.data['_bin']['_last']}}, {'name': 1, })
+    return r.sort('prefix', ASCENDING).limit(1)
   
   def _I_P_is_leaf(self):
     '''
     returns True if self is leaf
     '''
+    log.d(('_I_P_is_leaf'))
     if self.data['prefix'] == 32:
       return True
   
@@ -62,16 +66,26 @@ class ipv4(base):
     '''
     returns True if self is parent of child
     '''
+    log.d(('_I_P_is_parent_of'))
     return self.data['scope'] == child['scope'] and \
       self.data['prefix'] < child['prefix'] and \
       self.data['_bin']['_first'] <= child['_bin']['_first'] and \
       self.data['_bin']['_last'] >= child['_bin']['_last']
+  
+  def _I_P_is_equal_to(self, second):
+    '''
+    returns True if self equals to second
+    '''
+    log.d(('_I_P_is_equal_to'))
+    return self.data['scope'] == second['scope'] and \
+      self.data['name'] == second['name'] and \
+      self.data['prefix'] == second['prefix']
 
 
 
 class Ipv4View(MethodView):
   '''
-  API operations: get, post, put, delete
+  API operations: get, post, delete, put, patch
   '''
   method_decorators = []
   aaas = {}
@@ -87,9 +101,24 @@ class Ipv4View(MethodView):
       return ipv4.post(request.json)
     except Exception as e:
       return e400(e)
-
   
-  def put(self, id):
+  def patch(self):
+    try:
+      return ipv4.patch(request.json)
+    except Exception as e:
+      return e400(e)
+  
+  def delete(self, **kwargs):
+    try:
+      return ipv4.delete(**kwargs)
+    except Exception as e:
+      return e400(e)
+  
+  def put(self, **kwargs):
+    try:
+      return ipv4.put(**kwargs)
+    except Exception as e:
+      return e400(e)
     id = int(id)
     if id in self.aaas:
       aaa = self.aaas[id]
@@ -100,10 +129,6 @@ class Ipv4View(MethodView):
     aaa['tag']  = request.json.get('tag'),
     aaa['time']  = datetime.now()
     return aaa, 201
-  
-  def delete(self, **kwargs):
-    return ipv4.delete(**kwargs)
-
   
   def search(self, **kwargs):
     return ipv4.get(**kwargs)
