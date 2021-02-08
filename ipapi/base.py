@@ -1014,9 +1014,6 @@ class base:
       else:
         g.sess = s
         log.d(f'Session was registered to g.sess')
-      if 'active' in data and not data['active']:
-        #TODO add check to openapi
-        return e409(f'Delete not allowed, please use delete method instead')
       with s.start_transaction():
         a = cls(data)
         old = a._C_C_get_active()
@@ -1054,54 +1051,3 @@ class base:
           a._check_document_parents({'parents': {}})
           a._document_become_valid(cls)
           return a.json_one(), 201
-        #
-        # old code:
-        #
-        old = cls._find_one({'_id': UUID(_id)})
-        if not old:
-          return e404(f'put {_id} not found')
-        #TODO check below
-        if _id in old['parents'][cls.__name__]:
-          return e409(f'put {_id} root not allowed')
-        a = cls(kwargs)
-        if cls.IMPLICIT_PARENTS and not a._I_P_is_equal_to(old):
-          return e409(f'put {_id} change unique key not allowed for implicit parents')
-        a._set_parents()
-        #?? set _version and _uuid_active ??
-        a._set_access()
-        #update
-        a._replace_one()
-        log.i(('put', _id, a.data))
-        #TODO change to ['active']
-        if not old['_meta']['_active']:
-          #undeleted
-          if cls.IMPLICIT_PARENTS and not a._I_P_is_leaf():
-            #check if parent's children are own children
-            for i in a.data['parents'][a._class]:
-              for ii in cls._get_children_same_class(i):
-                if a._I_P_is_parent_of(ii):
-                  b = cls(ii['_id'], 'copy')
-                  #parents
-                  p = b.data['parents']
-                  #remove old parent
-                  p[a._class].remove(i)
-                  #add new parent
-                  p[a._class].append(str(a.data['_id']))
-                  #update
-                  b._replace_one()
-        return a.json_one(), 200
-
-
-
-#TODO database_initialization:
-#_meta._uuid_previous
-#active
-#? auto_activate
-#? auto_deactivate
-#? firewall
-#? labels
-#? reverse
-#? whitelisted
-#
-#TODO deleted:
-#_meta._uuid_active
