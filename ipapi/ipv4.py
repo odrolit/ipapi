@@ -80,6 +80,35 @@ class ipv4(base):
     return self.data['scope'] == second['scope'] and \
       self.data['name'] == second['name'] and \
       self.data['prefix'] == second['prefix']
+  
+  def _parent_added(self, parent_cls, parent_id):
+    '''
+    custom handling when parent was added
+    
+    expects parent_cls (string only) and parent_id
+    '''
+    log.d(('_parent_added', parent_cls, parent_id))
+    if parent_cls == 'whitelist':
+      #blackholed IP can not be whitelisted
+      if self.data['parents']['blackhole']:
+        raise Exception(f'can not add {self.data[_id]} to whitelist, is blackholed')
+      if self.data['parents']['blackhole-queue']:
+        raise Exception(f'can not add {self.data[_id]} to whitelist, is blackholed')
+    elif parent_cls in ['blackhole', 'blackhole-queue']:
+      if self.data['parents']['whitelist']:
+        raise Exception(f'can not add {self.data[_id]} to blackhole, is whitelisted')
+      if self.data['scope'] != 'global':
+        raise Exception(f'can not add {self.data[_id]} to blackhole, not global')
+      if parent_cls == 'blackhole':
+        blackhole_add(parent_id, self.data['name'], self.data['prefix'])
+  
+  def _parent_deleted(self, parent):
+    '''
+    custom handling when parent was deleted
+        
+    expects parent_cls (string only) and parent_id
+    '''
+    log.d(('_parent_deleted', parent_cls, parent_id))
 
 
 
