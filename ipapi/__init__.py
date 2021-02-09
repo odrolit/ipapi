@@ -19,7 +19,7 @@ from .user import user, UserView
 from .group import group, GroupView
 from .router import RouterView
 
-from .custom.blackhole import blackhole_add, blackhole_del
+from .custom.blackhole import ipv4_blackhole_add, ipv4_blackhole_del
 
 
 

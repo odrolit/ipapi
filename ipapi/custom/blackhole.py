@@ -1,5 +1,5 @@
-def blackhole_add(parent_id, ip, prefix):
+def ipv4_blackhole_add(parent_id, ip, prefix):
   pass
 
-def blackhole_del(parent_id, ip, prefix):
+def ipv4_blackhole_del(parent_id, ip, prefix):
   pass

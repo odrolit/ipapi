@@ -129,8 +129,14 @@ class base:
   basic properties and functions
   
   child class must define:
-  - _C_C_get_active()
-  - _C_C_get_active_valid_parents()
+  - _C_M_get_active()
+  - _C_M_get_active_valid_parents()
+  
+  child class can optionally define:
+  - _C_O_parent_added()
+  - _C_O_parent_deleted()
+  - _C_O_child_added()
+  - _C_O_child_deleted()
   '''
   
   IMPLICIT_PARENTS = False
@@ -356,20 +362,20 @@ class base:
       return True
     raise Exception('_user_has_access function failed')
   
-  def _C_C_get_active(self):
+  def _C_M_get_active(self):
     '''
-    returns valid document or None
+    returns valid document or None,
+    the document can be valid or deleted
     '''
-    log.e('_C_C_get_active')
+    log.e('_C_M_get_active')
     raise NotImplementedError()
   
-  def _C_C_get_active_valid_parents(self):
+  def _C_M_get_active_valid_parents(self):
     '''
-    method must be defined by child class,
     returns list containing direct active
     and valid parents or root document
     '''
-    log.e('_C_C_get_active_valid_parents')
+    log.e('_C_M_get_active_valid_parents')
     raise NotImplementedError()
   
   @classmethod
@@ -437,11 +443,11 @@ class base:
     if self.IMPLICIT_PARENTS:
       #force clear submitted parents
       self.data['parents'][self._class] = []
-      for i in self._C_C_get_active_valid_parents():
+      for i in self._C_M_get_active_valid_parents():
         self.data['parents'][self._class].append(str(i['_id']))
     elif self.data['parents'][self._class] == []:
       #only set parents if missing
-      for i in self._C_C_get_active_valid_parents():
+      for i in self._C_M_get_active_valid_parents():
         self.data['parents'][self._class].append(str(i['_id']))
     log.d(('_set_parents', self.data))
   
@@ -667,47 +673,93 @@ class base:
     when document changed
     
     walks through added parents and
-      calls custom _parent_added function
+      calls custom _C_O_parent_added function
     walks through deleted parents and
-      calls custom _parent_deleted function
+      calls custom _C_O_parent_deleted function
     
-    TODO abort if same-class parental loops exists
+    abort if parental loops exists
     '''
     log.d(('_check_document_parents', self.data, old))
-    #chceck added parents
+    #check added parents
     for i in self.data['parents']:
       if i in old['parents']:
         for j in self.data['parents'][i]:
           if j not in old['parents'][i]:
-            self._parent_added(i, j)
+            #instantiate parent from db
+            p = getattr(g, i)(j, 'db')
+            self._C_O_parent_added(p)
+            p._C_O_child_added(self)
       else:
         for j in self.data['parents'][i]:
-          self._parent_added(i, j)
-    #chceck deleted parents
+          #instantiate parent from db
+          p = getattr(g, i)(j, 'db')
+          self._C_O_parent_added(p)
+          p._C_O_child_added(self)
+    #check deleted parents
     for i in old['parents']:
       if i in self.data['parents']:
         for j in old['parents'][i]:
           if j not in self.data['parents'][i]:
-            self._parent_deleted(i, j)
+            #instantiate parent from db
+            p = getattr(g, i)(j, 'db')
+            self._C_O_parent_deleted(i, j)
+            p._C_O_child_deleted(self)
       else:
         for j in old['parents'][i]:
-          self._parent_deleted(i, j)
+          #instantiate parent from db
+          p = getattr(g, i)(j, 'db')
+          self._C_O_parent_deleted(i, j)
+          p._C_O_child_deleted(self)
+    if _parental_loop_exists(self.data['_id'], self.data):
+      #documents with walid children can not be deleted
+      raise Exception('_parental_loop_exists')
   
-  def _parent_added(self, parent_cls, parent_id):
+  @staticmethod
+  def _parental_loop_exists(_id, data):
+    log.d(('_parental_loop_exists', _id, data))
+    for i in data['parents']:
+      cls = getattr(g, i)
+      for j in data['parents'][i]:
+        if _id == j:
+          return True
+        jj = cls._find_one({'_id': _id}, {'parents': 1})
+        return _parental_loop_exists(_id, jj)        
+  
+  def _C_O_parent_added(self, parent):
     '''
     custom handling when parent was added
     
-    expects parent_cls (string only) and parent_id
+    expects parent instance as parameter
     '''
-    log.d(('_parent_added', parent_cls, parent_id))
+    log.d(('_C_O_parent_added', self._class, self.data['_id'],
+           parent._class, parent.data['_id']))
   
-  def _parent_deleted(self, parent_cls, parent_id):
+  def _C_O_parent_deleted(self, parent):
     '''
     custom handling when parent was deleted
         
-    expects parent_cls (string only) and parent_id
+    expects parent instance as parameter
     '''
-    log.d(('_parent_deleted', parent_cls, parent_id))
+    log.d(('_C_O_parent_deleted', self._class, self.data['_id'],
+           parent._class, parent.data['_id']))
+  
+  def _C_O_child_added(self, child):
+    '''
+    custom handling when child was added
+    
+    expects child instance as parameter
+    '''
+    log.d(('_C_O_child_added', self._class, self.data['_id'],
+           child._class, child.data['_id']))
+  
+  def _C_O_child_deleted(self, child):
+    '''
+    custom handling when child was deleted
+        
+    expects child instance as parameter
+    '''
+    log.d(('_C_O_child_deleted', self._class, self.data['_id'],
+           child._class, child.data['_id']))
   
   def _document_become_invalid(self, cls):
     '''
@@ -716,8 +768,6 @@ class base:
     
     if IMPLICIT_PARENTS and self is not leaf,
       then get them adopted by parent
-    
-    TODO abor if same-class parental loops exists
     '''
     log.d(('_document_become_invalid', cls, self.data))
     if cls.IMPLICIT_PARENTS and not self._I_P_is_leaf():
@@ -744,16 +794,19 @@ class base:
     return self.data
   
   @staticmethod
-  def json_multi(data):
+  def json_multi_user_has_access_get(data, cls):
     '''
     print debug and return list of objects
     '''
-    a = []
+    r = []
     if data:
       for i in data:
-        a.append(i)
-    log.d(('json_multi', a))
-    return a
+        if i and cls._user_has_access('get', i):
+          r.append(i)
+        else:
+          log.d(('json_multi_user_has_access_get', 'removed', i))
+    log.d(('json_multi_user_has_access_get', r))
+    return r
   
   @staticmethod
   def collections():
@@ -772,7 +825,10 @@ class base:
     all other paramaters except projection are omitted,
     in this case returns:
       200 if document found
+      400 bad request raised by enveloping view
+      403 access denied
       404 if not found
+      500 internal server error
     
     else get whole collection with other attributes applied,
       if _meta._active is not present in find,
@@ -780,8 +836,11 @@ class base:
       if _meta._valid is not present in find,
         then _meta._valid: True is added,
     then it returns:
-     200 and list of documents, empty list
-      is returned if nothing found
+      200 and list of documents, empty list
+        is returned if nothing found or
+        if access denied to all documents
+      400 bad request raised by enveloping view
+      500 internal server error
     
     Attributes description:
     https://docs.mongodb.com/manual/reference/operator/query/
@@ -824,10 +883,7 @@ class base:
     else:
       a = cls._find_multi(find, projection=projection, sort=sort, skip=skip, limit=limit)
       #always return list, not 404
-      a = base.json_multi(a)
-      for i in a:
-        if not cls._user_has_access('get', i):
-          a.remove(i)
+      a = base.json_multi_user_has_access_get(a, cls)
       return a, 200
   
   @classmethod
@@ -838,14 +894,10 @@ class base:
     '''
     create document if not exists or is deleted, returns:
       201 document created
+      400 bad request raised by enveloping view
+      403 access denied
       409 document already exists
-    
-    TODO check for parental loops
-    
-    TODO check access
-    
-    TODO action if parents are added/deleted (blackhole, ..)
-    
+      500 internal server error
     '''
     log.d(('post', data))
     with g.ipapi.client.start_session() as s:
@@ -856,7 +908,7 @@ class base:
         log.d(f'Session was registered to g.sess')
       with s.start_transaction():
         a = cls(data)
-        old = a._C_C_get_active()
+        old = a._C_M_get_active()
         if old and old['_meta']['_valid']:
           #document already exists
           return e409('already exists old["_id"]')
@@ -907,7 +959,9 @@ class base:
     patch document or create if not exists, returns:
       200 document patched
       201 document created
-    
+      400 bad request raised by enveloping view
+      403 access denied
+      500 internal server error
     '''
     log.d(('patch', data))
     with g.ipapi.client.start_session() as s:
@@ -918,8 +972,8 @@ class base:
         log.d(f'Session was registered to g.sess')
       with s.start_transaction():
         a = cls(data)
-        old = a._C_C_get_active()
-        #python 3.8: if old := a._C_C_get_active()
+        old = a._C_M_get_active()
+        #python 3.8: if old := a._C_M_get_active()
         if old:
           '''
           patch
@@ -965,7 +1019,13 @@ class base:
   @validate_user
   def delete(cls, data):
     '''
-    delete document by setting active = False
+    delete document by setting _meta._valid = False, returns:
+      204 deleted
+      400 bad request raised by enveloping view
+      403 access denied
+      404 not found
+      409 not alled to delete root document
+      500 internal server error
     '''
     log.d(('delete', data))
     with g.ipapi.client.start_session() as s:
@@ -976,7 +1036,7 @@ class base:
         log.d(f'Session was registered to g.sess')
       with s.start_transaction():
         a = cls(data)
-        old = a._C_C_get_active()
+        old = a._C_M_get_active()
         if old and old['_meta']['_valid']:
           #document exists and is not deleted
           if not cls._user_has_access('delete', old):
@@ -1005,7 +1065,9 @@ class base:
     replace document or create document if not exists, returns:
       200 document replaced
       201 document created
-
+      400 bad request raised by enveloping view
+      403 access denied
+      500 internal server error
     '''
     log.d(('put', data))
     with g.ipapi.client.start_session() as s:
@@ -1016,8 +1078,8 @@ class base:
         log.d(f'Session was registered to g.sess')
       with s.start_transaction():
         a = cls(data)
-        old = a._C_C_get_active()
-        #python 3.8: if old := a._C_C_get_active()
+        old = a._C_M_get_active()
+        #python 3.8: if old := a._C_M_get_active()
         if old:
           if not cls._user_has_access('put', old, data):
             return e403('Access denied for method put')

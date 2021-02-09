@@ -29,24 +29,24 @@ class ipv4(base):
       self.data['_bin']['_first'] = n.network_address.packed
       self.data['_bin']['_last'] = n.broadcast_address.packed
   
-  def _C_C_get_active(self):
+  def _C_M_get_active(self):
     '''
     returns active document or None,
     the document can be valid or deleted
     '''
-    log.d(('_C_C_get_active'))
+    log.d(('_C_M_get_active'))
     r = self._find_one({'_meta._active': True,
                         'name': self.data['name'],
                         'prefix': self.data['prefix'],
                         'scope': self.data['scope']})
     return r
   
-  def _C_C_get_active_valid_parents(self):
+  def _C_M_get_active_valid_parents(self):
     '''
     returns list containing direct active
     and valid parents or root document
     '''
-    log.d(('_C_C_get_active_valid_parents'))
+    log.d(('_C_M_get_active_valid_parents'))
     r = g.ipv4.find({'_meta._active': True,
                      '_meta._valid': True,
                      'scope': self.data['scope'],
@@ -81,34 +81,44 @@ class ipv4(base):
       self.data['name'] == second['name'] and \
       self.data['prefix'] == second['prefix']
   
-  def _parent_added(self, parent_cls, parent_id):
+  
+  def _C_O_parent_added(self, parent):
     '''
     custom handling when parent was added
     
-    expects parent_cls (string only) and parent_id
+    expects parent instance as parameter
     '''
-    log.d(('_parent_added', parent_cls, parent_id))
-    if parent_cls == 'whitelist':
+    log.d(('_C_O_parent_added', self._class, self.data['_id'],
+           parent._class, parent.data['_id']))
+    if parent._class == 'ipv4_whitelist':
       #blackholed IP can not be whitelisted
-      if self.data['parents']['blackhole']:
+      if any(i in self.data['parents'] for i in ('ipv4_blackhole',
+                                                 'ipv4_blackhole_add', 'ipv4_blackhole_del')):
         raise Exception(f'can not add {self.data[_id]} to whitelist, is blackholed')
-      if self.data['parents']['blackhole-queue']:
-        raise Exception(f'can not add {self.data[_id]} to whitelist, is blackholed')
-    elif parent_cls in ['blackhole', 'blackhole-queue']:
-      if self.data['parents']['whitelist']:
+    elif parent._class in ('ipv4_blackhole',
+                           'ipv4_blackhole_add',
+                           'ipv4_blackhole_del'):
+      #whitelisted IP can not be blackholed
+      if self.data['parents']['ipv4_whitelist']:
         raise Exception(f'can not add {self.data[_id]} to blackhole, is whitelisted')
+      #only global scope can be blackholed
       if self.data['scope'] != 'global':
         raise Exception(f'can not add {self.data[_id]} to blackhole, not global')
-      if parent_cls == 'blackhole':
-        blackhole_add(parent_id, self.data['name'], self.data['prefix'])
+    #TODO move to ipv4_blackhole._C_O_child_added()
+    if parent._class == 'ipv4_blackhole':
+      ipv4_blackhole_add(parent_id, self.data['name'], self.data['prefix'])
   
-  def _parent_deleted(self, parent):
+  def _C_O_parent_deleted(self, parent):
     '''
     custom handling when parent was deleted
         
-    expects parent_cls (string only) and parent_id
+    expects parent instance as parameter
     '''
-    log.d(('_parent_deleted', parent_cls, parent_id))
+    log.d(('_C_O_parent_deleted', self._class, self.data['_id'],
+           parent._class, parent.data['_id']))
+    #TODO move to ipv4_blackhole._C_O_child_deleted()
+    if parent._class == 'ipv4_blackhole':
+      ipv4_blackhole_add(parent_id, self.data['name'], self.data['prefix'])
 
 
 
