@@ -1,15 +1,15 @@
 #id: http://10.0.0.105:5000/openapi.json
 openapi: 3.0.0
 info:
-  version: 1.0.0
+  version: "1"
   title: ipapi
-  description: API definitions for base and extended document schemas mapping GET/POST/PUT/DELETE requests
+  description: API definitions for base and extended document schemas mapping GET/POST/PUT/DELETE/PATCH requests
   license:
     name: MIT
 servers:
-- url: http://ip-dev:5000/
+- url: http://ipapi:5000/
   description: Production server
-- url: http://ip-dev:5001/
+- url: http://ipapi-dev:5000/
   description: Testing server
 paths:
   /ipv4:
@@ -34,7 +34,7 @@ paths:
           $ref: "#/components/schemas/ip"
       - name: find
         in: query
-        description: 'Query example {"name": "1.1.1.1"}, {"parents.blacklistv4": {"$exists": true, "$ne": []}}, https://docs.mongodb.com/manual/reference/operator/query/'
+        description: 'Query example {"name": "1.1.1.1"}, {"parents.blacklistv4": {"$exists": true, "$ne": []}}, full text search example {"$text": {"$search": "192"}}, details https://docs.mongodb.com/manual/reference/operator/query/'
         required: false
         schema:
           type: string
@@ -64,23 +64,23 @@ paths:
           type: integer
       responses:
         '200':
-          description: List of documents
+          description: List of found documents, list can be empty, documents without access are omitted
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4s"
         '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
+        '409':
+          $ref: "#/components/responses/Conflict"
         default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/DefaultError"
       security:
       - api_key: []
     post:
@@ -88,36 +88,30 @@ paths:
       tags:
       - ipv4
       requestBody:
-        description: Create document
+        description: Define all fields
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/ipv4"
       responses:
         '201':
-          description: Document created
+          description: Created
           content:
             application/json:
               schema:
                 $ref: "#components/schemas/ipv4"
-        '409':
-          description: Document already exists
-          content:
-            application/json:
-              schema:
-                $ref: "#components/schemas/Error"
         '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
+        '409':
+          $ref: "#/components/responses/Conflict"
         default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/DefaultError"
       security:
       - api_key: []
     patch:
@@ -125,42 +119,100 @@ paths:
       tags:
       - ipv4
       requestBody:
-        description: Patch or create document
+        description: Define patched fields only
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/ipv4"
       responses:
         '200':
-          description: Document patched
+          description: Patched
           content:
             application/json:
               schema:
                 $ref: "#components/schemas/ipv4"
         '201':
-          description: Document created
+          description: Created
           content:
             application/json:
               schema:
                 $ref: "#components/schemas/ipv4"
-        '409':
-          description: Document not patched or created
-          content:
-            application/json:
-              schema:
-                $ref: "#components/schemas/Error"
         '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
+        '409':
+          $ref: "#/components/responses/Conflict"
         default:
-          description: Error
+          $ref: "#/components/responses/DefaultError"
+      security:
+      - api_key: []
+    delete:
+      summary: Delete document if exists
+      tags:
+      - ipv4
+      requestBody:
+        description: Define mandatory fields only
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ipv4"
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
+        '409':
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/DefaultError"
+      security:
+      - api_key: []
+    put:
+      summary: Document update or create if not exists
+      tags:
+      - ipv4
+      requestBody:
+        description: Define all fields
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ipv4"
+      responses:
+        '200':
+          description: Updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/ipv4"
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ipv4"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
+        '409':
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/DefaultError"
       security:
       - api_key: []
   /ipv4/{_id}:
@@ -203,194 +255,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ipv4"
-        '404':
-          description: Document not found if searched by _id
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-      security:
-      - api_key: []
-    delete:
-      summary: Document delete
-      tags:
-      - ipv4
-      parameters:
-      - name: _user_name
-        in: query
-        description: User name must be set to actual user
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 256
-      - name: _user_ip
-        in: query
-        description: User ip must be set to ipv4 or IPv6 address of actual user
-        required: true
-        schema:
-          $ref: "#/components/schemas/ip"
-      - name: _id
-        in: path
-        description: The _id of document
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '204':
-          description: Document deleted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ipv4"
-        '404':
-          description: Document not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/AccessDenied"
+        '405':
+          $ref: "#/components/responses/MethodNotAllowed"
         '409':
-          description: Document not deleted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/Conflict"
         default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/DefaultError"
       security:
       - api_key: []
-    put:
-      summary: Document update or create if not exists
-      tags:
-      - ipv4
-      parameters:
-      - name: _user_name
-        in: query
-        description: User name must be set to actual user
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 256
-      - name: _user_ip
-        in: query
-        description: User ip must be set to ipv4 or IPv6 address of actual user
-        required: true
-        schema:
-          $ref: "#/components/schemas/ip"
-      - name: _id
-        in: path
-        description: The _id of document
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: Document updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ipv4"
-        '201':
-          description: Document created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ipv4"
-        '409':
-          description: Document not updated or created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-      security:
-      - api_key: []
-  /router:
-    get:
-      summary: List all Routers
-      tags:
-      - router
-      parameters:
-      - name: limit
-        in: query
-        description: How many items return
-        required: false
-        schema:
-          type: integer
-      responses:
-        '200':
-          description: Array of Routers
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Routers"
-        default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      summary: Create Router
-      tags:
-      - router
-      requestBody:
-        description: Router to add
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/Router"
-      responses:
-        '201':
-          description: Router created
-          content:
-            application/json:
-              schema:
-                $ref: "#components/schemas/Router"
-        default:
-          description: Error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
 components:
+  
+  responses:    
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+    AccessDenied:
+      description: Access denied
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+    MethodNotAllowed:
+      description: Method not allowed
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+    DefaultError:
+      description: Default error
+      content:
+        application/json:
+          schema:
+            $ref: "#components/schemas/Error"
+  
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: X-Auth
+      in: header
+      x-apikeyInfoFunc: ipapi.apikey_auth
+
   schemas:
     
     Error:
@@ -546,6 +478,10 @@ components:
               description: Identity provider ipv4 or IPv6 address
               minLength: 1
               maxLength: 256
+              readOnly: true
+            _ipapi_version:
+              type: integer
+              description: IPAPI version
               readOnly: true
         parents:
           type: object
@@ -787,11 +723,3 @@ components:
           maximum: 32
           example: 32
           default: 32
-  
-  securitySchemes:
-    api_key:
-      type: apiKey
-      name: X-Auth
-      in: header
-      x-apikeyInfoFunc: ipapi.apikey_auth
-
