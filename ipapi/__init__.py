@@ -11,13 +11,14 @@ LOGLEVEL = 'DEBUG'
 import connexion
 from connexion.resolver import MethodViewResolver
 from flask import g
+from datetime import datetime
 
 from .apikey import apikey_auth
 from .base import base, log
-from .ipv4 import ipv4, Ipv4View
 from .user import user, UserView
-from .group import group, GroupView
-from .router import RouterView
+from .access import access, AccessView
+from .ipv4 import ipv4, Ipv4View
+
 
 from .custom.blackhole import ipv4_blackhole_add, ipv4_blackhole_del
 
@@ -49,15 +50,31 @@ def create_app():
     '''
     disconnects db at the end of request
     '''
+    if hasattr(g, 'rid'):
+      rid = str(g.rid)
+      del g.rid
+      log.d((rid, str(datetime.now()), 'disconnect_db',
+             f'removed request {rid}'))
+    else:
+      rid = None
     if hasattr(g, 'ipapi'):
       for i in base.collections():
-        # g[i] = g.ipapi[i] throws exception
-        # TypeError: '_AppCtxGlobals' object does not support item assignment
+        '''
+        g[i] = g.ipapi[i] throws exception
+        TypeError: '_AppCtxGlobals' object does not
+        support item assignment
+        '''
         g.pop(i, None)
-        log.d(f'Disconnected collection {i}')
+        log.d((rid, str(datetime.now()), 'disconnect_db',
+               f'disconnect collection {i}'))
       g.ipapi.client.close()
       del g.ipapi
-      log.d('Disconnected database ipapi')
+      log.d((rid, str(datetime.now()), 'disconnect_db',
+             'disconnect database ipapi'))
+    #else:
+      #log.e((rid, str(datetime.now()), 'disconnect_db',
+             #'ipapi not connected (please ignore during database_initialization
+             #and openapi/ui manipulation)'))
   
   return app
 
