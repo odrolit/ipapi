@@ -57,10 +57,24 @@ with app.app.app_context():
       ipapi.log.i(f'Creating text index for collection {i}')
       db[i].create_index([('name', TEXT), ('description', TEXT)],
                         weights = {'name': 10, 'description': 1})
+      ipapi.log.i(f'Creating index name for collection {i}')
+      db[i].create_index([('_meta._active', 1),
+                          ('_meta._valid', 1),
+                          ('name', 1)])
+      ipapi.log.i(f'Creating index parents for collection {i}')
+      db[i].create_index([('_meta._active', 1),
+                          ('_meta._valid', 1),
+                          ('parents', 1)])
+      for j in collections:
+        ipapi.log.i(f'Creating index parents {j} for collection {i}')
+        db[i].create_index([('_meta._active', 1),
+                            ('_meta._valid', 1),
+                            (f'parents.{j}', 1)])
       data = {}
       data['description'] = f'Root {i} document'
       if i == 'ipv4':
         db[i].create_index([('_meta._active', 1),
+                            ('_meta._valid', 1),
                             ('scope', 1), 
                             ('_bin._first', 1), 
                             ('_bin._last', 1)])
@@ -92,6 +106,15 @@ with app.app.app_context():
         ii.data['parents']['access'] = []
         root_access = db.access.insert_one(ii.data).inserted_id
         ipapi.log.i(f'Created document {ii.data}')
+      elif i == 'ipv4nexthop':
+        data['name'] = 'root'
+        ii = ipapi.access(data, 'database_initialization')
+        ii.data['_meta']['_version'] = 1
+        ii.data['_meta']['_uuid_active'] = ii.data['_id']
+        ii.data['parents'] = {}
+        ii.data['parents']['ipv4nexthop'] = []
+        root_ipv4nexthop = db.ipv4nexthop.insert_one(ii.data).inserted_id
+        ipapi.log.i(f'Created document {ii.data}')
       else:
         ipapi.log.e(f'Unhandled {i}')
         raise Exception(f'Unhandled {i}')
@@ -122,6 +145,9 @@ with app.app.app_context():
         ipapi.log.i(f'Access added to {r.modified_count} root {i} documents')
       elif i == 'access':
         r = db.access.update_many({}, {'$set': {'access': root_access}})
+        ipapi.log.i(f'Access added to {r.modified_count} root {i} documents')
+      elif i == 'ipv4nexthop':
+        r = db.ipv4nexthop.update_many({}, {'$set': {'access': root_access}})
         ipapi.log.i(f'Access added to {r.modified_count} root {i} documents')
       else:
         ipapi.log.e(f'Unhandled {i}')

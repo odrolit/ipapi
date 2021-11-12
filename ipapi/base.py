@@ -175,7 +175,6 @@ class base:
   following funcions must be then defined:
   - _I_P_is_leaf()
   - _I_P_is_parent_of(child)
-  - _I_P_is_equal_to(second)
   and uniqueness should be defined too:
   - _C_U_get_active()
   - _C_U_get_active_valid_parents()
@@ -249,7 +248,7 @@ class base:
       raise AttributeError(f'Unknown data_source {data_source}')
     if not self.data:
       log.e((rid(), now(), '__init__', self._class, self.data_source, data))
-      raise AttributeError(f'Data not found')
+      raise AttributeError(f'Data not found, source {data_source}')
     if self.data_source in ['copy', 'copy_trust']:
       if not self.data['_meta']['_active']:
         log.e((rid(), now(), '__init__', self._class, self.data_source, data))
@@ -412,32 +411,31 @@ class base:
                  for i in g._user_access)
     elif method == 'patch' and patch:
       for i in patch:
-        print(f'i: {i}')
         #walk through all items in patch
         for j in data['access']['patch']:
-          print(f'j: {j}')
           #walk through all data access patch rules
           if match(j['match'], i):
-            print(f'match passed, {g._user_access}')
             #this data access patch rule match to item
             if any(k in j['patch']
                    for k in g._user_access):
               #success, access for this item is granted
-              print(f'any passed')
               break
         else:
           #no access for this item
-          print(f'no access')
+          log.w((rid(), now(), '_user_has_access', f'access denied {i}'))
           return False
+      log.d((rid(), now(), '_user_has_access', 'access granted'))
       return True
-    log.e((rid(), now(), '_user_has_access', cls.__name__, method, data, patch))
-    raise Exception('_user_has_access function failed')
+    else:
+      log.e((rid(), now(), '_user_has_access', f'unknown method {method}'))
+      raise Exception(f'_user_has_access unknown method {method}')
   
   def _C_U_get_active(self):
     '''
     returns active document or None,
     the document can be valid or deleted
     '''
+    log.d((rid(), now(), '_C_U_get_active'))
     r = self._find_one({'_meta._active': True,
                         'name': self.data['name']})
     log.d((rid(), now(), '_C_U_get_active', r))
@@ -448,6 +446,7 @@ class base:
     returns list containing direct active
     and valid parents or root document
     '''
+    log.d((rid(), now(), '_C_U_get_active_valid_parents'))
     r = self._find_multi_simple({'_meta._active': True,
                                  '_meta._valid': True,
                                  'name': 'root'})
@@ -520,11 +519,11 @@ class base:
       #force clear submitted parents
       self.data['parents'][self._class] = []
       for i in self._C_U_get_active_valid_parents():
-        self.data['parents'][self._class].append(str(i['_id']))
+        self.data['parents'][self._class].append(i['_id'])
     elif self.data['parents'][self._class] == []:
       #only set parents if missing
       for i in self._C_U_get_active_valid_parents():
-        self.data['parents'][self._class].append(str(i['_id']))
+        self.data['parents'][self._class].append(i['_id'])
     log.d((rid(), now(), '_set_parents', self.data))
   
   def _add_access(self, added):
@@ -600,9 +599,10 @@ class base:
     if 'put' not in self.data['access']:
       self.data['access']['put'] = []
     #get root access
-    r = g.access.find_one(
-        {'name': 'root', '_meta._active': True},
-        projection={'_id': 1})
+    r = base._find_one_other_class(
+      'access',
+      {'_meta._active': True, 'name': 'root'},
+      projection={'_id': 1})
     if not r:
       log.e((rid(), now(), '_set_access', self.data,
              'database corrupted, missing root access'))
@@ -676,6 +676,20 @@ class base:
     log.d((rid(), now(), '_find_one', cls.__name__, r))
     return r
   
+  @staticmethod
+  def _find_one_other_class(cls, find, projection = None):
+    '''
+    find and return one document
+    '''
+    log.d((rid(), now(), '_find_one_other_class', cls, find, projection))
+    col = getattr(g, cls)
+    if projection:
+      r = col.find_one(find, projection=projection)
+    else:
+      r = col.find_one(find)
+    log.d((rid(), now(), '_find_one_other_class', cls, r))
+    return r
+  
   @classmethod
   def _find_multi(cls, find, projection, sort, skip, limit):
     '''
@@ -689,13 +703,16 @@ class base:
   
   
   @classmethod
-  def _find_multi_simple(cls, find):
+  def _find_multi_simple(cls, find, hint = None):
     '''
     find and return list of documents of this class
     '''
-    log.d((rid(), now(), '_find_multi_simple', cls.__name__, find))
+    log.d((rid(), now(), '_find_multi_simple', cls.__name__, find, hint))
     col = getattr(g, cls.__name__)
-    r = col.find(find)
+    if hint:
+      r = col.find(find).hint(hint)
+    else:
+      r = col.find(find)
     log.d((rid(), now(), '_find_multi_simple', r.count()))
     return r
   
@@ -798,10 +815,12 @@ class base:
     for i in data['parents']:
       if _id in data['parents'][i]:
         return True
-      col = getattr(g, i)
+      #col = getattr(g, i)
+      cls = base.get_class(i)
       for j in data['parents'][i]:
-        #quick, but classmethod _find_one would be cleaner
-        jj = col.find_one({'_id': j}, {'parents': 1})
+        #classmethod _find_one is cleaner
+        #jj = col.find_one({'_id': j}, {'parents': 1})
+        jj = cls._find_one({'_id': j}, {'parents': 1})
         if jj and base._parental_loop_exists(_id, jj):
           return True
   
@@ -882,7 +901,6 @@ class base:
     r = []
     if data:
       for i in data:
-        print(i)
         if i and cls._user_has_access('get', i):
           if projection_access_hook:
             i.pop('access')
@@ -907,6 +925,8 @@ class base:
     for i in base.__subclasses__():
       if i.__name__ == name:
         return i
+    log.e((rid(), now(), 'get_class', f'unknown class {name}'))
+    raise Exception(f'get_class, unknown class {name}')
   
   @classmethod
   @connect_db

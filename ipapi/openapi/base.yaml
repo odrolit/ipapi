@@ -487,7 +487,17 @@ components:
           type: object
           description: Parent objects defining full mesh hierarchy. Each property is type of document containing Array of parent UUIDs. On creation all undefined properties from parent objects of the same type should be inherited by default
           properties:
+            user:
+              $ref: "#/components/schemas/UUIDs"
+            access:
+              $ref: "#/components/schemas/UUIDs"
             ipv4:
+              $ref: "#/components/schemas/UUIDs"
+            ipv4nexthop:
+              $ref: "#/components/schemas/UUIDs"
+            ipv4nexthopadd:
+              $ref: "#/components/schemas/UUIDs"
+            ipv4nexthopdel:
               $ref: "#/components/schemas/UUIDs"
           additionalProperties: false
         access:

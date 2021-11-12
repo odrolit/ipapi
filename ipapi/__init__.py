@@ -1,8 +1,8 @@
 ###########################
 
 
-LOGLEVEL = 'DEBUG'
-#LOGLEVEL = 'WARNING'
+#LOGLEVEL = 'DEBUG'
+LOGLEVEL = 'WARNING'
 
 
 ###########################
@@ -18,9 +18,10 @@ from .base import base, log
 from .user import user, UserView
 from .access import access, AccessView
 from .ipv4 import ipv4, Ipv4View
+from .ipv4nexthop import ipv4nexthop, Ipv4nexthopView
 
 
-from .custom.blackhole import ipv4_blackhole_add, ipv4_blackhole_del
+from .custom.nexthop import ipv4_nexthop_add, ipv4_nexthop_del
 
 
 
@@ -30,7 +31,7 @@ def create_app():
   '''
   app = connexion.FlaskApp(__name__,
                           specification_dir='openapi/',
-                          debug=True)
+                          debug=False)
   
   # load api
   app.add_api('base.yaml',

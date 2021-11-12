@@ -36,6 +36,7 @@ class ipv4(base):
     returns active document or None,
     the document can be valid or deleted
     '''
+    log.d((rid(), now(), '_C_U_get_active'))
     r = self._find_one({'_meta._active': True,
                         'scope': self.data['scope'],
                         '_bin._first': self.data['_bin']['_first'],
@@ -47,15 +48,30 @@ class ipv4(base):
     '''
     returns list containing direct active
     and valid parents or root document
+    
+    at 200k addresses new PUT takes:
+    - 3600 ms using index(200k), sort(2), limit(1)
+    - 900 ms using index(200k).hint(index).sort(2).limit(1)
+    - 600 ms using index(200k).hint(index) and manual iteration
     '''
-    r = self._find_multi_simple({'_meta._active': True,
-                     '_meta._valid': True,
-                     'scope': self.data['scope'],
-                     '_bin._first': {'$lte': self.data['_bin']['_first']},
-                     '_bin._last': {'$gte': self.data['_bin']['_last']}})
-    r.sort('prefix', ASCENDING).limit(1)
-    log.d((rid(), now(), '_C_U_get_active_valid_parents', r.count()))
-    return r
+    log.d((rid(), now(), '_C_U_get_active_valid_parents'))
+    hint = '_meta._active_1__meta._valid_1_scope_1__bin._first_1__bin._last_1'
+    r = self._find_multi_simple(
+      {'_meta._active': True,
+       '_meta._valid': True,
+       'scope': self.data['scope'],
+       '_bin._first': {'$lte': self.data['_bin']['_first']},
+       '_bin._last': {'$gte': self.data['_bin']['_last']}},
+      hint)
+    prefix = 0
+    for i in r:
+      if i['prefix'] >= prefix:
+        prefix = i['prefix']
+        s = i
+    #r.sort('prefix', ASCENDING).limit(1)
+    #log.d((rid(), now(), '_C_U_get_active_valid_parents', r.count()))
+    log.d((rid(), now(), '_C_U_get_active_valid_parents', s))
+    return [s]
   
   def _I_P_is_leaf(self):
     '''
@@ -78,17 +94,6 @@ class ipv4(base):
       self.data['_bin']['_last'] >= child['_bin']['_last']
     log.d((rid(), now(), '_I_P_is_parent_of', r))
     return r
-  
-  def _I_P_is_equal_to(self, second):
-    '''
-    returns True if self equals to second
-    '''
-    r = self.data['scope'] == second['scope'] and \
-      self.data['name'] == second['name'] and \
-      self.data['prefix'] == second['prefix']
-    log.d((rid(), now(), '_I_P_is_equal_to', r))
-    return r
-  
   
   def _C_O_parent_added(self, parent):
     '''
@@ -134,7 +139,7 @@ class ipv4(base):
            parent._class, parent.data['_id']))
     #TODO move to ipv4_nexthop._C_O_child_deleted()
     if parent._class == 'ipv4_nexthop':
-      ipv4_nexthop_add(parent_id, self.data['name'], self.data['prefix'])
+      ipv4_nexthop_del(parent_id, self.data['name'], self.data['prefix'])
     log.d((rid(), now(), '_C_O_parent_deleted', self._class, self.data['_id'],
            parent._class, parent.data['_id']))
 
